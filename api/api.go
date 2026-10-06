@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -101,7 +102,7 @@ func (s *APIServer) RegisterRoutes() error {
 	mux.HandleFunc("/api/projects/create", s.handleCreateProject)
 	mux.HandleFunc("/api/projects/delete", s.handleDeleteProject)
 
-	// 3. Search / Topics / Prompt Query Builder (api/search.go)
+	// 3. Search / Topics / Prompt Query Builder (api/search.go, api/tfidf.go)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/upload", s.handleUpload)
 	mux.HandleFunc("/api/tfidf", s.handleTFIDF)
@@ -161,6 +162,7 @@ func (s *APIServer) RegisterRoutes() error {
 	if err != nil {
 		return err
 	}
+	fileServer := http.FileServer(http.FS(subFS))
 
 	// Serve embedded static files with client-side SPA routing fallback
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -171,16 +173,21 @@ func (s *APIServer) RegisterRoutes() error {
 			return
 		}
 
-		path := r.URL.Path
-		if path == "/" {
-			path = "/index.html"
+		p := r.URL.Path
+		if p == "/" {
+			p = "/index.html"
 		}
-		filePath := strings.TrimPrefix(path, "/")
+		filePath := strings.TrimPrefix(path.Clean(p), "/")
 
-		// Check if file exists in the embedded directory
 		f, err := subFS.Open(filePath)
 		if err != nil {
-			// Fallback to index.html for client-side routing
+			// A missing asset (.js, .css, .png, ...) must be a real 404,
+			// otherwise the browser receives index.html as "JavaScript".
+			if path.Ext(filePath) != "" {
+				http.NotFound(w, r)
+				return
+			}
+			// Extension-less path: client-side route, serve the SPA shell.
 			indexData, err := fs.ReadFile(subFS, "index.html")
 			if err != nil {
 				http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -192,12 +199,16 @@ func (s *APIServer) RegisterRoutes() error {
 		}
 		f.Close()
 
-		http.FileServer(http.FS(subFS)).ServeHTTP(w, r)
+		fileServer.ServeHTTP(w, r)
 	})
 
+	// No WriteTimeout on purpose: SSE (MCP) and long extraction/download
+	// requests would be killed by it.
 	s.server = &http.Server{
-		Addr:    s.addr,
-		Handler: loggingMiddleware(mux),
+		Addr:              s.addr,
+		Handler:           loggingMiddleware(mux),
+		ReadHeaderTimeout: 15 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	return nil
@@ -241,6 +252,18 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.ResponseWriter.WriteHeader(code)
 }
 
+// Flush keeps SSE (/api/mcp) and any streaming response working through the middleware.
+func (lrw *loggingResponseWriter) Flush() {
+	if f, ok := lrw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (lrw *loggingResponseWriter) Unwrap() http.ResponseWriter {
+	return lrw.ResponseWriter
+}
+
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -251,20 +274,41 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// Stop gracefully shuts down the server.
+// Stop gracefully shuts down the server: cancel running work, stop HTTP, then close databases.
 func (s *APIServer) Stop(ctx context.Context) error {
+	// 1. Cancel every running background task so nothing writes while we close DBs.
+	s.mu.Lock()
+	for _, m := range []map[string]context.CancelFunc{
+		s.pipelineCancelFuncs, s.imputeCancelFuncs, s.exportCancelFuncs, s.cttCancelFuncs,
+	} {
+		for _, cancel := range m {
+			if cancel != nil {
+				cancel()
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	// 2. Stop accepting/finishing HTTP requests.
+	var shutdownErr error
+	if s.server != nil {
+		shutdownErr = s.server.Shutdown(ctx)
+	}
+
+	// 3. Close databases (managers may be cached under several keys; close each once).
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	closed := make(map[*db.DBManager]bool)
 	for _, mgr := range s.dbManagers {
-		mgr.Close()
+		if mgr != nil && !closed[mgr] {
+			closed[mgr] = true
+			mgr.Close()
+		}
 	}
 	for _, dbConn := range s.configDBs {
 		dbConn.Close()
 	}
-	if s.server != nil {
-		return s.server.Shutdown(ctx)
-	}
-	return nil
+	return shutdownErr
 }
 
 func (s *APIServer) getProjectPaths(project string) (configDBPath, papersDBPath, jsonlDir, dbDir, uploadsDir string) {
@@ -314,11 +358,39 @@ func (s *APIServer) getProjectPaths(project string) (configDBPath, papersDBPath,
 	return
 }
 
+// keyMutex returns a stable mutex for a cache key (used to serialize "open once" logic).
+func (s *APIServer) keyMutex(key string) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.projectMutexes == nil {
+		s.projectMutexes = make(map[string]*sync.Mutex)
+	}
+	m, ok := s.projectMutexes[key]
+	if !ok {
+		m = &sync.Mutex{}
+		s.projectMutexes[key] = m
+	}
+	return m
+}
+
 func (s *APIServer) getConfigDB(project string) (*sql.DB, error) {
 	if project == "" {
 		project = "default"
 	}
 	project = sanitizeProjectName(project)
+
+	s.mu.Lock()
+	if dbConn, ok := s.configDBs[project]; ok {
+		s.mu.Unlock()
+		return dbConn, nil
+	}
+	s.mu.Unlock()
+
+	// Serialize creation per project so two simultaneous requests can't both
+	// open config.db and both run the "count == 0" seed insert.
+	mu := s.keyMutex("config:" + project)
+	mu.Lock()
+	defer mu.Unlock()
 
 	s.mu.Lock()
 	if dbConn, ok := s.configDBs[project]; ok {
@@ -342,7 +414,6 @@ func (s *APIServer) getConfigDB(project string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	// Initialize config database schema
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS config (
 			id INTEGER PRIMARY KEY,
@@ -381,16 +452,16 @@ func (s *APIServer) getConfigDB(project string) (*sql.DB, error) {
 	}
 
 	var count int
-	err = dbConn.QueryRow("SELECT COUNT(*) FROM config").Scan(&count)
-	if err != nil {
+	if err := dbConn.QueryRow("SELECT COUNT(*) FROM config").Scan(&count); err != nil {
 		dbConn.Close()
 		return nil, err
 	}
 
 	if count == 0 {
-		// Default config values
-		email := "sathyarajasekar5873@gmail.com"
-		apiKeys := "28leglCF5hY0mVmVYXSNNm"
+		// Default config values. Credentials are intentionally empty:
+		// users enter their own in Settings (or set STRATUM_OPENALEX_EMAIL / STRATUM_OPENALEX_KEYS).
+		email := os.Getenv("STRATUM_OPENALEX_EMAIL")
+		apiKeys := os.Getenv("STRATUM_OPENALEX_KEYS")
 		dateFrom := "2003-01-01"
 		dateTo := "2024-12-31"
 		docTypes := "article,review,proceedings-article"
@@ -487,6 +558,48 @@ func (s *APIServer) initializeProjectFiles(project string) error {
 	return nil
 }
 
+// openDBMgrAtPath returns the single shared manager for a database file.
+// The cache is keyed by absolute path, so the same file is never opened twice
+// (DuckDB allows only one writer process/connection set per file).
+func (s *APIServer) openDBMgrAtPath(dbFile string) (*db.DBManager, error) {
+	abs, err := filepath.Abs(dbFile)
+	if err != nil {
+		abs = dbFile
+	}
+	cacheKey := "path:" + abs
+
+	s.mu.Lock()
+	if mgr, ok := s.dbManagers[cacheKey]; ok {
+		s.mu.Unlock()
+		return mgr, nil
+	}
+	s.mu.Unlock()
+
+	mu := s.keyMutex(cacheKey)
+	mu.Lock()
+	defer mu.Unlock()
+
+	s.mu.Lock()
+	if mgr, ok := s.dbManagers[cacheKey]; ok {
+		s.mu.Unlock()
+		return mgr, nil
+	}
+	s.mu.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
+		return nil, err
+	}
+	mgr, err := db.NewDBManager(abs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database %s: %w", abs, err)
+	}
+
+	s.mu.Lock()
+	s.dbManagers[cacheKey] = mgr
+	s.mu.Unlock()
+	return mgr, nil
+}
+
 func (s *APIServer) getDBMgr(project string) (*db.DBManager, error) {
 	if project == "" {
 		project = "default"
@@ -498,41 +611,18 @@ func (s *APIServer) getDBMgr(project string) (*db.DBManager, error) {
 		s.mu.Unlock()
 		return mgr, nil
 	}
-
-	if s.projectMutexes == nil {
-		s.projectMutexes = make(map[string]*sync.Mutex)
-	}
-	projMu, ok := s.projectMutexes[project]
-	if !ok {
-		projMu = &sync.Mutex{}
-		s.projectMutexes[project] = projMu
-	}
-	s.mu.Unlock()
-
-	projMu.Lock()
-	defer projMu.Unlock()
-
-	// Double-check after acquiring the project mutex
-	s.mu.Lock()
-	if mgr, ok := s.dbManagers[project]; ok {
-		s.mu.Unlock()
-		return mgr, nil
-	}
 	s.mu.Unlock()
 
 	_, dbPath, _, _, _ := s.getProjectPaths(project)
 
-	dbDir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dbDir, 0755); err != nil {
-		return nil, err
-	}
-
-	mgr, err := db.NewDBManager(dbPath)
+	mgr, err := s.openDBMgrAtPath(dbPath)
 	if err != nil {
 		return nil, err
 	}
 	_ = mgr.CreateSchema()
 
+	// Keep the per-project alias so other files that read s.dbManagers[project]
+	// keep working; it points at the same manager as the path key.
 	s.mu.Lock()
 	s.dbManagers[project] = mgr
 	s.mu.Unlock()
@@ -637,44 +727,8 @@ func (s *APIServer) getDBMgrForFile(project, rawFile string) (*db.DBManager, err
 		targetPath = rawFile
 	}
 
-	cacheKey := "path:" + targetPath
-
-	s.mu.Lock()
-	if mgr, ok := s.dbManagers[cacheKey]; ok {
-		s.mu.Unlock()
-		return mgr, nil
-	}
-
-	if s.projectMutexes == nil {
-		s.projectMutexes = make(map[string]*sync.Mutex)
-	}
-	fileMu, ok := s.projectMutexes[cacheKey]
-	if !ok {
-		fileMu = &sync.Mutex{}
-		s.projectMutexes[cacheKey] = fileMu
-	}
-	s.mu.Unlock()
-
-	fileMu.Lock()
-	defer fileMu.Unlock()
-
-	s.mu.Lock()
-	if mgr, ok := s.dbManagers[cacheKey]; ok {
-		s.mu.Unlock()
-		return mgr, nil
-	}
-	s.mu.Unlock()
-
-	mgr, err := db.NewDBManager(targetPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database %s: %w", targetPath, err)
-	}
-
-	s.mu.Lock()
-	s.dbManagers[cacheKey] = mgr
-	s.mu.Unlock()
-
-	return mgr, nil
+	// Same absolute-path cache as getDBMgr, so one file = one manager.
+	return s.openDBMgrAtPath(targetPath)
 }
 
 func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {

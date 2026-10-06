@@ -1,83 +1,218 @@
 #!/usr/bin/env python3
-"""KeyBERT Semantic Re-Ranking for Stratum TF-IDF extraction."""
-import sys
-import json
+"""Reads a JSON request on stdin, writes a JSON response on stdout.
+KeyBERT and TF-IDF run in parallel; output is ordered based on KeyBERT."""
+import sys, json, re
+from concurrent.futures import ThreadPoolExecutor
 
-def compute_keybert_scores(docs, candidates, model_name="allenai-specter", alpha=0.1):
-    try:
-        from sentence_transformers import SentenceTransformer, util
-    except ImportError:
-        # Fallback to pure TF-IDF if sentence_transformers is not available
-        return candidates
+import numpy as np
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 
-    model = SentenceTransformer(model_name)
 
-    candidate_terms = [c["term"] for c in candidates]
-    candidate_lower = [c.lower() for c in candidate_terms]
-    term_scores = {t: [] for t in candidate_terms}
+def load_table(path):
+    if path.lower().endswith((".xlsx", ".xls")):
+        return pd.read_excel(path)
+    return pd.read_csv(path)
 
-    candidate_embeddings = model.encode(candidate_terms, show_progress_bar=False, convert_to_tensor=True)
-    doc_embeddings = model.encode(docs, show_progress_bar=False, convert_to_tensor=True, batch_size=32)
 
-    for doc, doc_emb in zip(docs, doc_embeddings):
-        doc_lower = doc.lower()
-        present_idx = [i for i, c in enumerate(candidate_lower) if c in doc_lower]
-        if not present_idx:
-            continue
-        sims = util.cos_sim(doc_emb, candidate_embeddings[present_idx])[0].tolist()
-        for idx, sim in zip(present_idx, sims):
-            term_scores[candidate_terms[idx]].append(sim)
+def build_docs(df, title_col, abstract_col):
+    parts = []
+    for col in (title_col, abstract_col):
+        if col in df.columns:
+            parts.append(df[col].fillna("").astype(str))
+    if not parts:
+        return []
+    docs = parts[0]
+    for p in parts[1:]:
+        docs = docs + ". " + p
+    return [d.strip() for d in docs.tolist() if len(d.strip()) > 20]
 
-    kb_scores = {t: (sum(s) / len(s) if s else 0.0) for t, s in term_scores.items()}
 
-    # Min-max normalization & blending
-    tfidf_vals = [c["score"] for c in candidates]
-    lo_tf, hi_tf = (min(tfidf_vals), max(tfidf_vals)) if tfidf_vals else (0.0, 1.0)
-    span_tf = (hi_tf - lo_tf) or 1.0
-    tfidf_norm = [(s - lo_tf) / span_tf for s in tfidf_vals]
+def extract_dois(df, doi_col):
+    if doi_col not in df.columns:
+        return []
+    out = []
+    for v in df[doi_col].dropna().astype(str):
+        v = re.sub(r"^https?://(dx\.)?doi\.org/", "", v.strip(), flags=re.I)
+        if re.match(r"^10\.\d{4,9}/.+$", v):
+            out.append(v)
+    return sorted(set(out))
 
-    kb_vals = [kb_scores.get(c["term"], 0.0) for c in candidates]
-    lo_kb, hi_kb = (min(kb_vals), max(kb_vals)) if kb_vals else (0.0, 1.0)
-    span_kb = (hi_kb - lo_kb) or 1.0
-    kb_norm = [(s - lo_kb) / span_kb for s in kb_vals]
 
-    blended = []
-    for i, c in enumerate(candidates):
-        term = c["term"]
-        if alpha <= 0.0:
-            combined = kb_vals[i]
-        elif alpha >= 1.0:
-            combined = c["score"]
+def run_tfidf(docs, ngram, min_df, max_df, k=None):
+    n = len(docs)
+    md = min(min_df, max(1, n))
+    vec = TfidfVectorizer(ngram_range=ngram, min_df=md, max_df=max_df,
+                          stop_words="english", sublinear_tf=True)
+    X = vec.fit_transform(docs)
+    scores = np.asarray(X.sum(axis=0)).ravel()
+    terms = vec.get_feature_names_out()
+
+    max_score = float(scores.max()) if len(scores) > 0 and scores.max() > 0 else 1.0
+    score_map = {}
+    for term, score in zip(terms, scores):
+        score_map[str(term).lower()] = float(score / max_score)
+
+    order = scores.argsort()[::-1]
+    if k is not None:
+        order = order[:k]
+    sorted_terms = [{"term": str(terms[i]), "tfidf_score": float(scores[i] / max_score)} for i in order]
+    return score_map, sorted_terms
+
+
+_model_cache = {}
+MODEL_ALIASES = {
+    "allenai-specter": "sentence-transformers/allenai-specter",
+    "specter": "sentence-transformers/allenai-specter",
+}
+
+
+def get_model(name):
+    target = MODEL_ALIASES.get(name.lower().strip(), name.strip())
+    if target not in _model_cache:
+        from sentence_transformers import SentenceTransformer
+        _model_cache[target] = SentenceTransformer(target)
+    return _model_cache[target]
+
+
+def run_keybert(docs, ngram, min_df, k, model_name, diversity=0.5, use_mmr=True):
+    model = get_model(model_name)
+    cv = CountVectorizer(ngram_range=ngram, min_df=min(min_df, max(1, len(docs))),
+                         stop_words="english", max_features=3000)
+    cv.fit(docs)
+    cands = list(cv.get_feature_names_out())
+    if not cands:
+        return []
+    doc_emb = model.encode(docs, batch_size=32, normalize_embeddings=True,
+                           show_progress_bar=False)
+    centroid = doc_emb.mean(axis=0, keepdims=True)
+    centroid_norm = np.linalg.norm(centroid)
+    if centroid_norm > 0:
+        centroid = centroid / centroid_norm
+
+    cand_emb = model.encode(cands, batch_size=64, normalize_embeddings=True,
+                            show_progress_bar=False)
+    sims = (cand_emb @ centroid.T).ravel()
+
+    if not use_mmr or diversity <= 0:
+        order = np.argsort(sims)[::-1]
+        if k is not None:
+            order = order[:k]
+        return [{"term": str(cands[i]), "keybert_score": float(sims[i])} for i in order]
+
+    selected, remaining = [], list(range(len(cands)))
+    while remaining and len(selected) < k:
+        if not selected:
+            idx = remaining[int(np.argmax(sims[remaining]))]
         else:
-            combined = alpha * tfidf_norm[i] + (1 - alpha) * kb_norm[i]
-        blended.append({
-            "term": term,
-            "score": float(combined),
-            "tfidf_score": float(c["score"]),
-            "keybert_score": float(kb_vals[i])
-        })
+            red = (cand_emb[remaining] @ cand_emb[selected].T).max(axis=1)
+            mmr = (1 - diversity) * sims[remaining] - diversity * red
+            idx = remaining[int(np.argmax(mmr))]
+        selected.append(idx)
+        remaining.remove(idx)
+    return [{"term": cands[i], "keybert_score": float(sims[i])} for i in selected]
 
-    blended.sort(key=lambda x: x["score"], reverse=True)
-    return blended
 
 def main():
-    try:
-        data = json.load(sys.stdin)
-        docs = data.get("docs", [])
-        candidates = data.get("candidates", [])
-        model_name = data.get("model_name", "allenai-specter")
-        alpha_val = data.get("alpha")
-        alpha = float(alpha_val) if alpha_val is not None else 0.1
+    req = json.load(sys.stdin)
+    df = load_table(req["path"])
+    docs = build_docs(df, req["title_column"], req["abstract_column"])
+    if not docs:
+        print(json.dumps({"error": "No usable text found in the selected title/abstract columns."}))
+        return
 
-        if not docs or not candidates:
-            print(json.dumps({"keywords": candidates}))
-            return
+    top_n = max(1, int(req.get("top_n", 50)))
+    use_kb = bool(req.get("use_keybert", True))
+    # Percentage of combination of TF-IDF with KeyBERT (default: 0.10 / 10%)
+    alpha = float(req.get("alpha", req.get("tfidf_share", 0.10)))
+    alpha = max(0.0, min(1.0, alpha))
+    ngram = (int(req.get("ngram_min", 1)), int(req.get("ngram_max", 3)))
+    min_df = int(req.get("min_df", 1))
+    max_df = float(req.get("max_df", 0.85))
+    model_name = req.get("keybert_model", "allenai-specter")
+    warnings = []
 
-        blended = compute_keybert_scores(docs, candidates, model_name, alpha)
-        print(json.dumps({"keywords": blended}))
-    except Exception as e:
-        sys.stderr.write(f"Error in KeyBERT scoring: {e}\n")
-        json.dump({"error": str(e), "keywords": data.get("candidates", []) if "data" in locals() else []}, sys.stdout)
+    # When alpha is 0, rank purely by KeyBERT cosine similarity in descending order (no MMR shuffling)
+    use_mmr = (alpha > 0.0)
+
+    # Run KeyBERT and TF-IDF in parallel
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_kb = ex.submit(run_keybert, docs, ngram, min_df, max(top_n * 2, top_n), model_name, 0.5, use_mmr) if use_kb else None
+        f_tf = ex.submit(run_tfidf, docs, ngram, min_df, max_df, top_n)
+
+        tfidf_map, tfidf_sorted = f_tf.result()
+        kb_list = []
+        if f_kb:
+            try:
+                kb_list = f_kb.result()
+            except Exception as e:
+                warnings.append(f"KeyBERT failed: {e}")
+
+    # Produce final keywords based on the order of KeyBERT with combining score
+    keywords = []
+    seen = set()
+
+    if kb_list:
+        for item in kb_list:
+            term = item["term"]
+            key = term.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            kb_score = float(item["keybert_score"])
+            tf_score = float(tfidf_map.get(key, 0.0))
+            if alpha <= 0.0:
+                # When combination is 0, do not consider TF-IDF at all; consider KeyBERT alone
+                comb_score = round(kb_score, 4)
+                keywords.append({
+                    "term": term,
+                    "score": comb_score,
+                    "combined_score": comb_score,
+                    "keybert_score": round(kb_score, 4),
+                    "source": "keybert",
+                })
+            else:
+                # Combining score: alpha% TF-IDF + (1 - alpha)% KeyBERT (default: 10% TF-IDF + 90% KeyBERT)
+                comb_score = round(alpha * tf_score + (1.0 - alpha) * kb_score, 4)
+                keywords.append({
+                    "term": term,
+                    "score": comb_score,
+                    "combined_score": comb_score,
+                    "keybert_score": round(kb_score, 4),
+                    "tfidf_score": round(tf_score, 4),
+                    "source": "hybrid",
+                })
+            if len(keywords) >= top_n:
+                break
+
+        if alpha <= 0.0:
+            # Arrange keywords strictly based on KeyBERT score in descending order
+            keywords.sort(key=lambda x: x["keybert_score"], reverse=True)
+    else:
+        for item in tfidf_sorted:
+            term = item["term"]
+            key = term.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            tf_score = float(item["tfidf_score"])
+            keywords.append({
+                "term": term,
+                "score": round(tf_score, 4),
+                "combined_score": round(tf_score, 4),
+                "tfidf_score": round(tf_score, 4),
+                "source": "tfidf",
+            })
+            if len(keywords) >= top_n:
+                break
+
+    print(json.dumps({
+        "keywords": keywords,
+        "dois": extract_dois(df, req.get("doi_column", "")),
+        "warnings": warnings,
+        "docs_used": len(docs),
+    }))
+
 
 if __name__ == "__main__":
     main()

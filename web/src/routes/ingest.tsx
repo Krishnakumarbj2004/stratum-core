@@ -213,140 +213,136 @@ function SearchableListEditor({
           </div>
         </div>
 
-        {activeTab === 'list' ? (
-          <div className="flex flex-col gap-3 flex-1 min-h-0">
-            {/* Add & Search Controls */}
-            <div className="flex flex-col sm:flex-row gap-2">
-              {/* Search Input */}
-              <div className="relative flex-1">
-                <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-zinc-450">
-                  <Search className="h-3.5 w-3.5" />
-                </span>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={`Search ${label.toLowerCase()}...`}
-                  className="w-full pl-8 pr-8 py-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded font-mono text-xs focus:outline-none"
-                />
-                {searchQuery && (
+        <div className={`w-full ${isModal ? 'h-[440px]' : 'h-52'} flex flex-col`}>
+          {activeTab === 'list' ? (
+            <div className="flex flex-col gap-2.5 h-full min-h-0">
+              {/* Add & Search Controls */}
+              <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                {/* Search Input */}
+                <div className="relative flex-1">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-zinc-450">
+                    <Search className="h-3.5 w-3.5" />
+                  </span>
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={`Search ${label.toLowerCase()}...`}
+                    className="w-full pl-8 pr-8 py-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded font-mono text-xs focus:outline-none"
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-zinc-455 hover:text-zinc-650 dark:hover:text-zinc-200 cursor-pointer"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick Add */}
+                <div className="flex gap-1">
+                  <input
+                    type="text"
+                    value={newItem}
+                    onChange={(e) => setNewItem(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        handleAddItem(e)
+                      }
+                    }}
+                    placeholder="Add item..."
+                    className="w-32 px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded font-mono text-xs focus:outline-none"
+                  />
                   <button
                     type="button"
-                    onClick={() => setSearchQuery('')}
-                    className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-zinc-455 hover:text-zinc-650 dark:hover:text-zinc-200 cursor-pointer"
+                    onClick={(e) => handleAddItem(e)}
+                    className="flex items-center justify-center p-1.5 border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-850 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-350 cursor-pointer"
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <Plus className="h-3.5 w-3.5" />
                   </button>
-                )}
-              </div>
-
-              {/* Quick Add */}
-              <div className="flex gap-1">
-                <input
-                  type="text"
-                  value={newItem}
-                  onChange={(e) => setNewItem(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      handleAddItem(e)
-                    }
-                  }}
-                  placeholder="Add item..."
-                  className="w-32 px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded font-mono text-xs focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={(e) => handleAddItem(e)}
-                  className="flex items-center justify-center p-1.5 border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-850 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-350 cursor-pointer"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Validation Error Message */}
-            {validationError && (
-              <div className="text-[11px] font-mono text-red-500 dark:text-red-400 flex items-center gap-1.5 px-1 py-0.5">
-                <AlertCircle className="h-3.5 w-3.5 animate-pulse" />
-                <span>{validationError}</span>
-              </div>
-            )}
-
-            {/* List display */}
-            <div
-              className={`flex-1 overflow-y-auto border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/10 rounded p-2.5 font-mono text-xs ${
-                isModal ? 'h-[400px]' : 'h-40'
-              }`}
-            >
-              {filteredItems.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-zinc-400 text-xs py-8">
-                  {searchQuery ? 'No matching items' : 'List is empty'}
                 </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    {visibleItems.map((item) => (
-                      <div
-                        key={item}
-                        className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-white dark:bg-zinc-900/50 border border-zinc-150 dark:border-zinc-800/80 rounded group hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors"
-                      >
-                        <span className="truncate select-all text-zinc-800 dark:text-zinc-200">
-                          {item}
-                        </span>
+              </div>
+
+              {/* Validation Error Message */}
+              {validationError && (
+                <div className="text-[11px] font-mono text-red-500 dark:text-red-400 flex items-center gap-1.5 px-1 py-0.5 shrink-0">
+                  <AlertCircle className="h-3.5 w-3.5 animate-pulse" />
+                  <span>{validationError}</span>
+                </div>
+              )}
+
+              {/* List display */}
+              <div className="flex-1 min-h-0 overflow-y-auto border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/10 rounded p-2.5 font-mono text-xs">
+                {filteredItems.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-zinc-400 text-xs py-8">
+                    {searchQuery ? 'No matching items' : 'List is empty'}
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                      {visibleItems.map((item) => (
+                        <div
+                          key={item}
+                          className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-white dark:bg-zinc-900/50 border border-zinc-150 dark:border-zinc-800/80 rounded group hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors"
+                        >
+                          <span className="truncate select-all text-zinc-800 dark:text-zinc-200">
+                            {item}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteItem(item)}
+                            className="text-zinc-400 hover:text-red-500 p-0.5 rounded cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    {!isModal && filteredItems.length > maxCollapsedItems && (
+                      <div className="text-center pt-2 border-t border-dashed border-zinc-200 dark:border-zinc-800/50 mt-1">
                         <button
                           type="button"
-                          onClick={() => handleDeleteItem(item)}
-                          className="text-zinc-400 hover:text-red-500 p-0.5 rounded cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                          onClick={() => setIsExpanded(true)}
+                          className="text-[10px] font-mono text-zinc-455 hover:text-zinc-700 dark:hover:text-zinc-300 uppercase font-bold cursor-pointer transition-colors"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          + {filteredItems.length - maxCollapsedItems} more items (click expand to
+                          edit/view all)
                         </button>
                       </div>
-                    ))}
+                    )}
                   </div>
-                  {!isModal && filteredItems.length > maxCollapsedItems && (
-                    <div className="text-center pt-2 border-t border-dashed border-zinc-200 dark:border-zinc-800/50 mt-1">
-                      <button
-                        type="button"
-                        onClick={() => setIsExpanded(true)}
-                        className="text-[10px] font-mono text-zinc-455 hover:text-zinc-700 dark:hover:text-zinc-300 uppercase font-bold cursor-pointer transition-colors"
-                      >
-                        + {filteredItems.length - maxCollapsedItems} more items (click expand to
-                        edit/view all)
-                      </button>
-                    </div>
-                  )}
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="h-full flex flex-col min-h-0">
+              <textarea
+                id={id}
+                disabled={disabled}
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                onBlur={handleRawBlur}
+                className="w-full flex-1 min-h-0 p-3 border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/10 font-mono text-xs leading-relaxed focus:outline-none rounded resize-none"
+                placeholder={placeholder}
+              />
+              {invalidLines.length > 0 && (
+                <div className="mt-2 p-2 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded flex flex-col gap-1 shrink-0">
+                  <span className="text-[11px] font-mono font-bold text-red-650 dark:text-red-400 flex items-center gap-1">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    Warning: {invalidLines.length} invalid{' '}
+                    {invalidLines.length === 1 ? 'item' : 'items'} detected
+                  </span>
+                  <span className="text-[10px] font-mono text-red-500 dark:text-red-400/80 max-h-16 overflow-y-auto">
+                    Invalid values: {invalidLines.join(', ')}
+                  </span>
                 </div>
               )}
             </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col min-h-0">
-            <textarea
-              id={id}
-              disabled={disabled}
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
-              onBlur={handleRawBlur}
-              className={`w-full p-3 border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/10 font-mono text-xs leading-relaxed focus:outline-none rounded resize-none flex-1 ${
-                isModal ? 'h-[400px]' : 'h-40'
-              }`}
-              placeholder={placeholder}
-            />
-            {invalidLines.length > 0 && (
-              <div className="mt-2 p-2 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded flex flex-col gap-1">
-                <span className="text-[11px] font-mono font-bold text-red-650 dark:text-red-400 flex items-center gap-1">
-                  <AlertCircle className="h-3.5 w-3.5" />
-                  Warning: {invalidLines.length} invalid{' '}
-                  {invalidLines.length === 1 ? 'item' : 'items'} detected
-                </span>
-                <span className="text-[10px] font-mono text-red-500 dark:text-red-400/80 max-h-16 overflow-y-auto">
-                  Invalid values: {invalidLines.join(', ')}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
+          )}
+        </div>
       </div>
     )
   }
@@ -491,7 +487,6 @@ export function Ingest() {
   const [maxDF] = useState(0.85)
   const [useKeyBERT, setUseKeyBERT] = useState(true)
   const [keybertModel, setKeybertModel] = useState('allenai-specter')
-  const [candidatePool, setCandidatePool] = useState(20)
   const [alphaBlend, setAlphaBlend] = useState(0.1)
   const [extracting, setExtracting] = useState(false)
   const [extractedKeywords, setExtractedKeywords] = useState<ScoredKeyword[]>([])
@@ -989,26 +984,29 @@ export function Ingest() {
           title_column: selectedTitleCol,
           abstract_column: selectedAbstractCol,
           doi_column: selectedDoiCol,
-          top_n: useKeyBERT ? Number(topN) : Number(candidatePool),
+          top_n: Number(topN),
           ngram_min: Number(ngramMin),
           ngram_max: Number(ngramMax),
           min_df: Number(minDF),
           max_df: Number(maxDF),
           use_keybert: useKeyBERT,
           keybert_model: keybertModel,
-          candidate_pool: Number(candidatePool),
           alpha: Number(alphaBlend),
+          tfidf_share: Number(alphaBlend),
         }),
       })
 
       if (response.ok) {
         const data = await response.json()
-        const list = (data.keywords || []).map(
+        let list = (data.keywords || []).map(
           (k: { term: string; score: number; tfidf_score?: number; keybert_score?: number }) => ({
             ...k,
             selected: true,
           }),
         )
+        if (alphaBlend === 0) {
+          list.sort((a, b) => (b.keybert_score ?? b.score ?? 0) - (a.keybert_score ?? a.score ?? 0))
+        }
         setExtractedKeywords(list)
         setAnchorsCount(data.anchors_count || 0)
         fetchConfig() // Reload config to reflect newly saved anchors in textarea
@@ -1699,6 +1697,21 @@ export function Ingest() {
   }
 
   const handleGetOpenAlexTopics = async () => {
+    const keysList = apiKeysStr
+      .split(',')
+      .map((k) => k.trim())
+      .filter(Boolean)
+
+    if (keysList.length === 0) {
+      triggerAlert(
+        'error',
+        'OpenAlex API Key Missing',
+        'OpenAlex API key is not configured. Please enter your OpenAlex API key in the Settings tab before discovering topics.',
+      )
+      addToast('error', 'API Key Required', 'OpenAlex API key is not configured.')
+      return
+    }
+
     if (checkingTopics) {
       handleCancelTopics()
       return
@@ -1717,11 +1730,6 @@ export function Ingest() {
     setOpenalexTopics(null)
     setOpenalexTopicsTotal(null)
     setOpenalexTopicsTotalPapers(null)
-
-    const keysList = apiKeysStr
-      .split(',')
-      .map((k) => k.trim())
-      .filter(Boolean)
     const topicsList = topics
       .split('\n')
       .map((t) => t.trim())
@@ -1786,6 +1794,21 @@ export function Ingest() {
 
   // Fetch Topics from Anchor Files / DOIs (matching openalex/commands/topic_search.py)
   const handleGetTopicsFromAnchors = async () => {
+    const keysList = apiKeysStr
+      .split(',')
+      .map((k) => k.trim())
+      .filter(Boolean)
+
+    if (keysList.length === 0) {
+      triggerAlert(
+        'error',
+        'OpenAlex API Key Missing',
+        'OpenAlex API key is not configured. Please enter your OpenAlex API key in the Settings tab before fetching topics from anchors.',
+      )
+      addToast('error', 'API Key Required', 'OpenAlex API key is not configured.')
+      return
+    }
+
     const anchorsList = anchors
       .split('\n')
       .map((a) => a.trim())
@@ -1813,11 +1836,6 @@ export function Ingest() {
     setOpenalexTopics(null)
     setOpenalexTopicsTotal(null)
     setOpenalexTopicsTotalPapers(null)
-
-    const keysList = apiKeysStr
-      .split(',')
-      .map((k) => k.trim())
-      .filter(Boolean)
 
     const currentTopicsList = topics
       .split('\n')
@@ -2503,12 +2521,12 @@ export function Ingest() {
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-[9px] font-mono uppercase text-zinc-400">
-                        {useKeyBERT ? 'Candidate Pool' : 'Top N terms'}
+                        Top N terms
                       </label>
                       <input
                         type="number"
-                        value={candidatePool}
-                        onChange={(e) => setCandidatePool(Number(e.target.value))}
+                        value={topN}
+                        onChange={(e) => setTopN(Number(e.target.value))}
                         className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-1 rounded font-mono text-xs text-center focus:outline-none"
                       />
                     </div>
@@ -2526,7 +2544,7 @@ export function Ingest() {
                         />
                         <span className="text-[10px] font-mono font-bold uppercase text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
                           <Brain className="h-3.5 w-3.5 text-purple-500" />
-                          KeyBERT Semantic Re-Ranking
+                          KeyBERT Semantic Extraction (Parallel with TF-IDF)
                         </span>
                       </div>
                       {useKeyBERT && (
@@ -2538,53 +2556,53 @@ export function Ingest() {
 
                     {useKeyBERT && (
                       <div className="flex flex-col gap-2 p-2.5 bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 rounded font-mono text-xs">
-                        <div className="flex flex-col gap-1">
-                          <label className="text-[9px] uppercase text-zinc-400 font-bold">
-                            Embedding Model
-                          </label>
-                          <select
-                            value={keybertModel}
-                            onChange={(e) => setKeybertModel(e.target.value)}
-                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-1.5 rounded text-xs focus:outline-none"
-                          >
-                            <option value="allenai-specter">
-                              allenai-specter (Scientific Papers)
-                            </option>
-                          </select>
-                        </div>
-
                         <div className="grid grid-cols-2 gap-2">
                           <div className="flex flex-col gap-1">
                             <label className="text-[9px] uppercase text-zinc-400 font-bold">
-                              Top N terms
+                              Embedding Model
                             </label>
-                            <input
-                              type="number"
-                              value={topN}
-                              onChange={(e) => setTopN(Number(e.target.value))}
-                              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-1 rounded text-xs text-center focus:outline-none"
-                            />
+                            <div className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-1.5 rounded text-xs flex items-center justify-between">
+                              <span className="font-semibold text-zinc-800 dark:text-zinc-200">allenai-specter</span>
+                              <span className="text-[9px] text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/40 px-1 py-0.5 rounded font-mono font-bold uppercase">Scientific</span>
+                            </div>
                           </div>
+
                           <div className="flex flex-col gap-1">
                             <label className="text-[9px] uppercase text-zinc-400 font-bold">
-                              Blend Weight (α)
+                              TF-IDF Combination (%)
                             </label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              min="0"
-                              max="1"
-                              value={alphaBlend}
-                              onChange={(e) => setAlphaBlend(Number(e.target.value))}
-                              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-1 rounded text-xs text-center focus:outline-none"
-                            />
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="5"
+                                value={Math.round(alphaBlend * 100)}
+                                onChange={(e) => {
+                                  const val = Math.max(0, Math.min(100, Number(e.target.value)))
+                                  const newAlpha = val / 100
+                                  setAlphaBlend(newAlpha)
+                                  if (newAlpha === 0) {
+                                    setExtractedKeywords((prev) =>
+                                      [...prev].sort(
+                                        (a, b) =>
+                                          (b.keybert_score ?? b.score ?? 0) -
+                                          (a.keybert_score ?? a.score ?? 0),
+                                      ),
+                                    )
+                                  }
+                                }}
+                                className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-1 rounded text-xs text-center focus:outline-none w-full"
+                              />
+                              <span className="text-[10px] text-zinc-500 font-mono">%</span>
+                            </div>
                           </div>
                         </div>
+
                         <span className="text-[9px] text-zinc-400 leading-normal font-sans">
-                          Candidate pool extracts {candidatePool} TF-IDF terms and re-ranks them via
-                          dense semantic embeddings, returning top {topN} (α={alphaBlend}:{' '}
+                          KeyBERT and TF-IDF run in parallel. Combining score ={' '}
                           {Math.round(alphaBlend * 100)}% TF-IDF +{' '}
-                          {Math.round((1 - alphaBlend) * 100)}% KeyBERT).
+                          {Math.round((1 - alphaBlend) * 100)}% KeyBERT (default: 10% TF-IDF).
                         </span>
                       </div>
                     )}
@@ -2661,32 +2679,35 @@ export function Ingest() {
                         </div>
                         <div className="flex items-center gap-1.5">
                           {kw.keybert_score !== undefined ? (
-                            <>
-                              {alphaBlend > 0 && (
+                            alphaBlend === 0 || kw.tfidf_score === undefined ? (
+                              <span
+                                className="text-[10px] text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30 px-1.5 py-0.5 rounded font-mono font-bold"
+                                title={`KeyBERT Score: ${kw.keybert_score.toFixed(4)} (TF-IDF 0% - Pure KeyBERT)`}
+                              >
+                                KB: {kw.keybert_score.toFixed(4)}
+                              </span>
+                            ) : (
+                              <>
                                 <span
                                   className="text-[9px] text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 px-1 py-0.5 rounded font-mono font-semibold"
-                                  title={`TF-IDF: ${kw.tfidf_score?.toFixed(4) || kw.score.toFixed(4)}`}
+                                  title={`TF-IDF Score: ${kw.tfidf_score.toFixed(4)}`}
                                 >
-                                  tf: {(kw.tfidf_score ?? kw.score).toFixed(3)}
+                                  tf: {kw.tfidf_score.toFixed(3)}
                                 </span>
-                              )}
-                              <span
-                                className="text-[9px] text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30 px-1 py-0.5 rounded font-mono font-semibold"
-                                title={`KeyBERT: ${kw.keybert_score.toFixed(4)}`}
-                              >
-                                KB: {kw.keybert_score.toFixed(3)}
-                              </span>
-                              <span
-                                className="text-[10px] text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/20 px-1.5 py-0.5 rounded font-mono font-bold"
-                                title={
-                                  alphaBlend === 0
-                                    ? `KeyBERT Score: ${kw.score.toFixed(4)}`
-                                    : `Combined (α=${alphaBlend}): ${kw.score.toFixed(4)}`
-                                }
-                              >
-                                c: {kw.score.toFixed(4)}
-                              </span>
-                            </>
+                                <span
+                                  className="text-[9px] text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30 px-1 py-0.5 rounded font-mono font-semibold"
+                                  title={`KeyBERT Score: ${kw.keybert_score.toFixed(4)}`}
+                                >
+                                  KB: {kw.keybert_score.toFixed(3)}
+                                </span>
+                                <span
+                                  className="text-[10px] text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/20 px-1.5 py-0.5 rounded font-mono font-bold"
+                                  title={`Combined Score (${Math.round(alphaBlend * 100)}% TF-IDF + ${Math.round((1 - alphaBlend) * 100)}% KeyBERT): ${kw.score.toFixed(4)}`}
+                                >
+                                  c: {kw.score.toFixed(4)}
+                                </span>
+                              </>
+                            )
                           ) : (
                             <span
                               className="text-[10px] text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/20 px-1.5 py-0.5 rounded font-mono font-bold"
@@ -2733,7 +2754,7 @@ export function Ingest() {
               )}
             </div>
 
-            {/* RIGHT SUB-COLUMN: Query Builder, Topics & Anchors Editor (cols: 6) */}
+            {/* RIGHT SUB-COLUMN: Query Builder & Anchors Editor (cols: 6) */}
             <div className="lg:col-span-6 flex flex-col gap-6">
               <div className="flex flex-col gap-3 border border-zinc-200 dark:border-zinc-800 p-5 rounded bg-white dark:bg-zinc-950/10">
                 <div className="flex items-center justify-between flex-wrap gap-2">
@@ -2865,8 +2886,8 @@ export function Ingest() {
                 </div>
               </div>
 
-              {/* Anchor DOIs Config Panel & Topics Link */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Anchor DOIs Config Panel */}
+              <div>
                 <SearchableListEditor
                   id="anchors-input"
                   label="Anchor DOIs (anchor.txt)"
@@ -2877,33 +2898,6 @@ export function Ingest() {
                   maxCollapsedItems={6}
                   validate={validateDoi}
                 />
-
-                <div className="flex flex-col justify-between p-4 bg-zinc-50/50 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-800 rounded">
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
-                        <Tag className="h-3.5 w-3.5 text-zinc-500" />
-                        Target Topic IDs
-                      </span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
-                        {selectedTopicsList.length} configured
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-zinc-400 font-sans leading-relaxed">
-                      Configure OpenAlex Topic IDs (<code>topics.txt</code>) in the dedicated{' '}
-                      <strong>Topic ID</strong> tab with live cluster discovery, bulk addition, and
-                      format validation.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('topics')}
-                    className="mt-3 flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-zinc-850 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded font-mono text-xs font-bold uppercase text-zinc-800 dark:text-zinc-200 transition cursor-pointer"
-                  >
-                    <Tag className="h-3.5 w-3.5 text-zinc-500" />
-                    <span>Manage Topic IDs in Topic ID Tab &rarr;</span>
-                  </button>
-                </div>
               </div>
             </div>
           </div>
@@ -2982,6 +2976,22 @@ export function Ingest() {
 
                 {/* Trigger & Discovery Action Buttons */}
                 <div className="flex flex-col gap-2.5">
+                  {!apiKeysStr.trim() && (
+                    <div className="flex items-center justify-between p-2.5 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded text-amber-800 dark:text-amber-300 text-xs font-mono">
+                      <div className="flex items-center gap-1.5">
+                        <AlertCircle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                        <span>OpenAlex API key is not configured.</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('settings')}
+                        className="text-[10px] uppercase font-bold underline hover:text-amber-950 dark:hover:text-amber-100 cursor-pointer"
+                      >
+                        Set in Settings &rarr;
+                      </button>
+                    </div>
+                  )}
+
                   <div className="flex flex-col sm:flex-row gap-2.5">
                     {checkingTopics ? (
                       <button

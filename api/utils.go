@@ -32,6 +32,7 @@ func sanitizeProjectName(name string) string {
 func findPythonInterpreter() string {
 	candidates := []string{
 		"/run/media/krishnakumar/New Volume/IISC/openAlex_data_collection/.venv/bin/python",
+		"/home/krishnakumar/stratum-venv/bin/python",
 		filepath.Join("..", "openAlex_data_collection", ".venv", "bin", "python"),
 		"python3",
 		"python",
