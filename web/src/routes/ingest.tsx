@@ -486,7 +486,7 @@ export function Ingest() {
   const [minDF, setMinDF] = useState(2)
   const [maxDF] = useState(0.85)
   const [useKeyBERT, setUseKeyBERT] = useState(true)
-  const [keybertModel, setKeybertModel] = useState('allenai-specter')
+  const [keybertModel] = useState('allenai-specter')
   const [alphaBlend, setAlphaBlend] = useState(0.1)
   const [extracting, setExtracting] = useState(false)
   const [extractedKeywords, setExtractedKeywords] = useState<ScoredKeyword[]>([])
@@ -1005,7 +1005,7 @@ export function Ingest() {
           }),
         )
         if (alphaBlend === 0) {
-          list.sort((a, b) => (b.keybert_score ?? b.score ?? 0) - (a.keybert_score ?? a.score ?? 0))
+          list.sort((a: any, b: any) => (b.keybert_score ?? b.score ?? 0) - (a.keybert_score ?? a.score ?? 0))
         }
         setExtractedKeywords(list)
         setAnchorsCount(data.anchors_count || 0)
@@ -1932,7 +1932,7 @@ export function Ingest() {
         escapeCSV(t.domain || ''),
         t.frequency ?? t.paper_count,
         `${(t.coverage ?? t.percentage).toFixed(2)}%`,
-        escapeCSV(t.importance || ''),
+        escapeCSV((t.importance || '').replace(/[★☆✩*]/g, '').trim()),
         escapeCSV(t.status || (isTopicSelected(t.topic_id) ? 'Already Present' : 'NEW')),
         escapeCSV(t.example_doi || ''),
       ])
@@ -3142,10 +3142,7 @@ export function Ingest() {
                               <th className="p-3 w-12 text-center font-bold">Target</th>
                               <th className="p-3 w-24">Topic ID</th>
                               {topicDiscoverySource === 'anchors' && (
-                                <>
-                                  <th className="p-3 w-20 text-center">Status</th>
-                                  <th className="p-3 w-28">Importance</th>
-                                </>
+                                <th className="p-3 w-28">Importance</th>
                               )}
                               <th className="p-3">Topic & Hierarchy</th>
                               <th className="p-3 text-right w-24 font-bold">
@@ -3154,9 +3151,6 @@ export function Ingest() {
                               <th className="p-3 text-right w-32 font-bold">
                                 {topicDiscoverySource === 'anchors' ? 'Coverage %' : 'Share %'}
                               </th>
-                              {topicDiscoverySource === 'anchors' && (
-                                <th className="p-3 w-36">Example DOI</th>
-                              )}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -3164,7 +3158,6 @@ export function Ingest() {
                               .slice(0, showAllTopics ? openalexTopics.length : 15)
                               .map((topic) => {
                                 const selected = isTopicSelected(topic.topic_id)
-                                const isNew = topic.status === 'NEW' || (!topic.status && !selected)
                                 return (
                                   <tr
                                     key={topic.topic_id}
@@ -3189,43 +3182,44 @@ export function Ingest() {
                                     </td>
 
                                     {topicDiscoverySource === 'anchors' && (
-                                      <>
-                                        <td className="p-3 text-center font-mono text-[10px]">
-                                          {isNew ? (
-                                            <span className="px-1.5 py-0.5 rounded font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-300/40">
-                                              NEW
-                                            </span>
-                                          ) : (
-                                            <span className="px-1.5 py-0.5 rounded font-medium bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-                                              Present
-                                            </span>
-                                          )}
-                                        </td>
-                                        <td className="p-3 font-mono text-[10px]">
-                                          {topic.importance ? (
-                                            <span
-                                              className={`font-semibold ${
-                                                topic.importance.includes('Critical')
-                                                  ? 'text-red-600 dark:text-red-400'
-                                                  : topic.importance.includes('High')
-                                                    ? 'text-amber-600 dark:text-amber-400'
-                                                    : topic.importance.includes('Medium')
-                                                      ? 'text-blue-600 dark:text-blue-400'
-                                                      : 'text-zinc-400'
-                                              }`}
-                                            >
-                                              {topic.importance}
-                                            </span>
-                                          ) : (
-                                            '—'
-                                          )}
-                                        </td>
-                                      </>
+                                      <td className="p-3 font-mono text-[10px]">
+                                        {topic.importance ? (
+                                          <span
+                                            className={`font-semibold ${
+                                              topic.importance.includes('Critical')
+                                                ? 'text-red-600 dark:text-red-400'
+                                                : topic.importance.includes('High')
+                                                  ? 'text-amber-600 dark:text-amber-400'
+                                                  : topic.importance.includes('Medium')
+                                                    ? 'text-blue-600 dark:text-blue-400'
+                                                    : 'text-zinc-400'
+                                            }`}
+                                          >
+                                            {topic.importance.replace(/[★☆✩*]/g, '').trim()}
+                                          </span>
+                                        ) : (
+                                          '—'
+                                        )}
+                                      </td>
                                     )}
 
                                     <td
                                       className="p-3 font-medium text-zinc-900 dark:text-zinc-100 max-w-[220px]"
-                                      title={`${topic.display_name} — ${topic.description || ''}`}
+                                      title={
+                                        topic.description
+                                          ? `${topic.display_name}\n\nDescription:\n${topic.description}${
+                                              topic.subfield || topic.field || topic.domain
+                                                ? `\n\nHierarchy:\n${[topic.subfield, topic.field, topic.domain]
+                                                    .filter(Boolean)
+                                                    .join(' › ')}`
+                                                : ''
+                                            }`
+                                          : topic.subfield || topic.field || topic.domain
+                                            ? `${topic.display_name} — ${[topic.subfield, topic.field, topic.domain]
+                                                .filter(Boolean)
+                                                .join(' › ')}`
+                                            : topic.display_name
+                                      }
                                     >
                                       <div className="font-semibold truncate">
                                         {topic.display_name}
@@ -3267,21 +3261,6 @@ export function Ingest() {
                                         </span>
                                       </div>
                                     </td>
-
-                                    {topicDiscoverySource === 'anchors' && (
-                                      <td
-                                        className="p-3 font-mono text-[10px] text-zinc-500 dark:text-zinc-400 truncate max-w-[140px]"
-                                        title={topic.example_doi || ''}
-                                      >
-                                        {topic.example_doi ? (
-                                          <span className="bg-zinc-100 dark:bg-zinc-900 px-1 py-0.5 rounded border border-zinc-200/40 dark:border-zinc-800 truncate block">
-                                            {topic.example_doi}
-                                          </span>
-                                        ) : (
-                                          '—'
-                                        )}
-                                      </td>
-                                    )}
                                   </tr>
                                 )
                               })}

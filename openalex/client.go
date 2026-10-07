@@ -1146,11 +1146,39 @@ type GroupByResponse struct {
 	} `json:"meta"`
 }
 
+type TopicKeywords []string
+
+func (tk *TopicKeywords) UnmarshalJSON(data []byte) error {
+	var strList []string
+	if err := json.Unmarshal(data, &strList); err == nil {
+		*tk = strList
+		return nil
+	}
+	var objList []struct {
+		DisplayName string `json:"display_name"`
+		ID          string `json:"id"`
+	}
+	if err := json.Unmarshal(data, &objList); err == nil {
+		res := make([]string, len(objList))
+		for i, o := range objList {
+			if o.DisplayName != "" {
+				res[i] = o.DisplayName
+			} else {
+				res[i] = o.ID
+			}
+		}
+		*tk = res
+		return nil
+	}
+	*tk = nil
+	return nil
+}
+
 type TopicDetails struct {
-	ID          string   `json:"id"`
-	DisplayName string   `json:"display_name"`
-	Description string   `json:"description"`
-	Keywords    []string `json:"keywords"`
+	ID          string        `json:"id"`
+	DisplayName string        `json:"display_name"`
+	Description string        `json:"description"`
+	Keywords    TopicKeywords `json:"keywords"`
 	Domain      struct {
 		DisplayName string `json:"display_name"`
 	} `json:"domain"`

@@ -1964,17 +1964,17 @@ var doiExtractorRe = regexp.MustCompile(`(?i)10\.\d{4,9}/\S+`)
 
 func getTopicImportance(pct float64) string {
 	if pct >= 20.0 {
-		return "★★★★★ Critical"
+		return "Critical"
 	} else if pct >= 10.0 {
-		return "★★★★ High"
+		return "High"
 	} else if pct >= 5.0 {
-		return "★★★ Medium"
+		return "Medium"
 	} else if pct >= 2.0 {
-		return "★★ Low"
+		return "Low"
 	} else if pct >= 1.0 {
-		return "★ Very Low"
+		return "Very Low"
 	}
-	return "✩ Negligible"
+	return "Negligible"
 }
 
 var doiPrefixRe = regexp.MustCompile(`(?i)^(?:https?://(?:dx\.)?doi\.org/|doi:)`)
