@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { Link } from '@tanstack/react-router'
 import { useProject } from '../context/ProjectContext'
 import {
   Save,
@@ -7,14 +8,12 @@ import {
   Upload,
   AlertCircle,
   Key,
-  Calendar,
   Copy,
   Play,
   CheckCircle,
   Search,
   PieChart,
   Square,
-  Bell,
   FileText,
   X,
   Activity,
@@ -24,7 +23,6 @@ import {
   Trash2,
   Download,
   Terminal,
-  Settings,
   Sparkles,
   Brain,
   Filter,
@@ -459,7 +457,7 @@ export function Ingest() {
   const [selectedDocTypes, setSelectedDocTypes] = useState<Record<string, boolean>>({
     article: true,
     review: true,
-    'proceedings-article': true,
+    'conference-paper': true,
     preprint: false,
     'book-chapter': false,
     dataset: false,
@@ -750,9 +748,9 @@ export function Ingest() {
   const [saveSuccess, setSaveSuccess] = useState(false)
 
   // Navigation & Tab States
-  const [activeTab, setActiveTab] = useState<
-    'keywords' | 'topics' | 'execution' | 'imputation' | 'settings'
-  >('keywords')
+  const [activeTab, setActiveTab] = useState<'keywords' | 'topics' | 'execution' | 'imputation'>(
+    'keywords',
+  )
 
   // Imputation Tab States (openalex impute-country)
   interface ImputeFileItem {
@@ -828,29 +826,6 @@ export function Ingest() {
     setToasts((prev) => prev.filter((t) => t.id !== id))
   }
 
-  // Web Browser Notification Permission State
-  const [notificationPermission, setNotificationPermission] = useState<
-    'granted' | 'denied' | 'default' | 'unsupported'
-  >(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      return Notification.permission
-    }
-    return 'unsupported'
-  })
-
-  const requestNotificationPermission = async () => {
-    if (!('Notification' in window)) return
-    const permission = await Notification.requestPermission()
-    setNotificationPermission(permission)
-    if (permission === 'granted') {
-      addToast(
-        'success',
-        'Notifications Enabled',
-        'You will now receive desktop notifications when processes finish.',
-      )
-    }
-  }
-
   const sendNotification = (title: string, body: string) => {
     if ('Notification' in window && Notification.permission === 'granted') {
       try {
@@ -887,22 +862,42 @@ export function Ingest() {
         setConfigHistory(data.history || [])
 
         if (cfg) {
-          setApiKeysStr(cfg.api?.keys?.join(', ') || '')
-          setApiEmail(cfg.api?.email || '')
-          setDateFrom(cfg.filters?.date_from || '2003-01-01')
-          setDateTo(cfg.filters?.date_to || '2024-12-31')
+          const loadedKeys = cfg.api?.keys?.join(', ') || ''
+          const loadedEmail = cfg.api?.email || ''
+          const effectiveKeys =
+            loadedKeys ||
+            (typeof window !== 'undefined' ? localStorage.getItem('stratum_api_keys') || '' : '')
+          const effectiveEmail =
+            loadedEmail ||
+            (typeof window !== 'undefined' ? localStorage.getItem('stratum_api_email') || '' : '')
+
+          setApiKeysStr(effectiveKeys)
+          setApiEmail(effectiveEmail)
+          setDateFrom(
+            cfg.filters?.date_from ||
+              (typeof window !== 'undefined'
+                ? localStorage.getItem('stratum_date_from') || '2003-01-01'
+                : '2003-01-01'),
+          )
+          setDateTo(
+            cfg.filters?.date_to ||
+              (typeof window !== 'undefined'
+                ? localStorage.getItem('stratum_date_to') || '2024-12-31'
+                : '2024-12-31'),
+          )
 
           const types = cfg.filters?.doc_types || []
           const typeMap: Record<string, boolean> = {
             article: false,
             review: false,
-            'proceedings-article': false,
+            'conference-paper': false,
             preprint: false,
             'book-chapter': false,
             dataset: false,
           }
           types.forEach((t: string) => {
-            typeMap[t] = true
+            const mapped = t === 'proceedings-article' ? 'conference-paper' : t
+            typeMap[mapped] = true
           })
           setSelectedDocTypes(typeMap)
         }
@@ -1706,7 +1701,7 @@ export function Ingest() {
       triggerAlert(
         'error',
         'OpenAlex API Key Missing',
-        'OpenAlex API key is not configured. Please enter your OpenAlex API key in the Settings tab before discovering topics.',
+        'OpenAlex API key is not configured. Please enter your OpenAlex API key in the Settings page before discovering topics.',
       )
       addToast('error', 'API Key Required', 'OpenAlex API key is not configured.')
       return
@@ -1803,7 +1798,7 @@ export function Ingest() {
       triggerAlert(
         'error',
         'OpenAlex API Key Missing',
-        'OpenAlex API key is not configured. Please enter your OpenAlex API key in the Settings tab before fetching topics from anchors.',
+        'OpenAlex API key is not configured. Please enter your OpenAlex API key in the Settings page before fetching topics from anchors.',
       )
       addToast('error', 'API Key Required', 'OpenAlex API key is not configured.')
       return
@@ -2251,18 +2246,6 @@ export function Ingest() {
           >
             <Globe className="h-3.5 w-3.5 text-zinc-500" />
             Imputation
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('settings')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-md transition-all cursor-pointer ${
-              activeTab === 'settings'
-                ? 'bg-white dark:bg-zinc-800 shadow-sm text-zinc-955 dark:text-white border border-zinc-200/50 dark:border-zinc-700/50'
-                : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
-            }`}
-          >
-            <Settings className="h-3.5 w-3.5 text-zinc-500" />
-            Settings
           </button>
         </div>
       </div>
@@ -2982,13 +2965,12 @@ export function Ingest() {
                         <AlertCircle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
                         <span>OpenAlex API key is not configured.</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('settings')}
+                      <Link
+                        to="/settings"
                         className="text-[10px] uppercase font-bold underline hover:text-amber-950 dark:hover:text-amber-100 cursor-pointer"
                       >
                         Set in Settings &rarr;
-                      </button>
+                      </Link>
                     </div>
                   )}
 
@@ -3302,8 +3284,8 @@ export function Ingest() {
         {/* Tab 3: Execution & Search Analysis */}
         {activeTab === 'execution' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full">
-            {/* LEFT COLUMN: OpenAlex Search & Anchor Validation (cols: 6) */}
-            <div className="lg:col-span-6 flex flex-col gap-6">
+            {/* OpenAlex Search & Anchor Validation (cols: 12) */}
+            <div className="lg:col-span-12 flex flex-col gap-6">
               {/* Volume Estimation & Anchor Verification */}
               <div className="flex flex-col gap-4 border border-zinc-200 dark:border-zinc-800 p-5 rounded bg-white dark:bg-zinc-950/10 shadow-sm">
                 <div className="flex flex-col gap-2.5">
@@ -3432,17 +3414,32 @@ export function Ingest() {
                               />
                             </div>
                             {anchorsMissing.length > 0 && (
-                              <div className="mt-1 flex flex-col gap-1">
-                                <span className="text-[9px] font-mono text-amber-600 dark:text-amber-400 uppercase tracking-wide flex items-center gap-1 font-semibold">
+                              <div className="mt-2 flex flex-col gap-1.5">
+                                <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 uppercase tracking-wide flex items-center gap-1.5 font-semibold">
                                   <AlertCircle className="h-3 w-3 shrink-0" /> Missing{' '}
                                   {anchorsMissing.length} anchors from results
                                 </span>
-                                <div className="bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200/50 dark:border-amber-900/30 p-2 rounded text-[10px] font-mono text-zinc-500 dark:text-zinc-400 max-h-24 overflow-y-auto w-full text-left">
-                                  {anchorsMissing.map((doi) => (
-                                    <div key={doi} className="truncate">
-                                      • {doi}
-                                    </div>
-                                  ))}
+                                <div className="bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200/50 dark:border-amber-900/30 p-2.5 rounded text-[10px] font-mono text-zinc-500 dark:text-zinc-400 max-h-28 overflow-y-auto w-full text-left">
+                                  {anchorsMissing.map((doi) => {
+                                    const cleanDoi = doi
+                                      .trim()
+                                      .replace(/^(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:)/i, '')
+                                    const doiUrl = `https://doi.org/${cleanDoi}`
+                                    return (
+                                      <div key={doi} className="truncate py-0.5 leading-relaxed">
+                                        <span className="text-zinc-400 select-none mr-2">•</span>
+                                        <a
+                                          href={doiUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 hover:underline cursor-pointer"
+                                          title={doiUrl}
+                                        >
+                                          {doiUrl}
+                                        </a>
+                                      </div>
+                                    )
+                                  })}
                                 </div>
                               </div>
                             )}
@@ -3549,80 +3546,6 @@ export function Ingest() {
                     </button>
                   </div>
                 </div>
-              </div>
-            </div>
-
-            {/* RIGHT COLUMN: Topic Distribution Analysis (cols: 6) */}
-            <div className="lg:col-span-6 flex flex-col gap-6">
-              <div className="flex flex-col gap-4 border border-zinc-200 dark:border-zinc-800 p-5 rounded bg-white dark:bg-zinc-950/10">
-                <div className="flex flex-col gap-2.5">
-                  <span className="text-xs font-mono font-bold uppercase text-zinc-500">
-                    Topic Grouping & Distribution Analysis
-                  </span>
-                  <p className="text-[11px] text-zinc-400 font-sans leading-relaxed">
-                    Fetch sorted counts of the top 200 research topics matching keywords. Concurrent
-                    API requests resolve full names/descriptions.
-                  </p>
-
-                  {/* Topics summaries badge */}
-                  <div className="min-h-[6rem] py-4 px-3 border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/10 rounded flex flex-col items-center justify-center gap-1 mt-1">
-                    {checkingTopics ? (
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <Loader2 className="h-5 w-5 animate-spin text-zinc-400" />
-                        <span className="text-[9px] font-mono text-zinc-400 uppercase tracking-widest font-bold">
-                          ANALYZING TOPICS...
-                        </span>
-                        <span className="text-[10px] font-sans text-zinc-400">
-                          Fetching OpenAlex topic clusters... Click Stop below to cancel.
-                        </span>
-                      </div>
-                    ) : openalexTopics !== null ? (
-                      <div className="w-full flex flex-col items-center gap-2.5">
-                        <div className="flex flex-col items-center justify-center gap-1">
-                          <span className="text-2xl font-mono font-bold text-zinc-900 dark:text-zinc-50">
-                            {openalexTopicsTotal?.toLocaleString() || 0}
-                          </span>
-                          <span className="text-[9px] font-mono text-zinc-400 uppercase tracking-widest font-bold">
-                            UNIQUE TOPICS FOUND
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-sans text-zinc-400">
-                          Mapped across{' '}
-                          <span className="font-semibold text-zinc-700 dark:text-zinc-300">
-                            {openalexTopicsTotalPapers?.toLocaleString()}
-                          </span>{' '}
-                          papers.
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-xs font-mono text-zinc-400 uppercase tracking-wider">
-                        No Topic Data Yet
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {checkingTopics ? (
-                  <button
-                    type="button"
-                    onClick={handleCancelTopics}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 border rounded font-mono text-xs font-bold uppercase bg-red-600 hover:bg-red-700 text-white border-red-700 transition cursor-pointer shadow-sm animate-pulse"
-                    title="Stop / Cancel Topic Analysis"
-                  >
-                    <Square className="h-3.5 w-3.5 fill-current" />
-                    Stop / Cancel Analysis
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleGetOpenAlexTopics}
-                    disabled={checkingCount || !keywords.trim() || queryValid === false}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 border rounded font-mono text-xs font-bold uppercase bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950 border-zinc-800 hover:bg-zinc-800 dark:hover:bg-zinc-200 disabled:opacity-50 cursor-pointer transition select-none"
-                  >
-                    <PieChart className="h-3.5 w-3.5" />
-                    Get Topic Distribution
-                  </button>
-                )}
               </div>
             </div>
 
@@ -4256,375 +4179,6 @@ export function Ingest() {
                     Clear Logs
                   </button>
                 )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 5: Settings */}
-        {activeTab === 'settings' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full">
-            {/* LEFT COLUMN: API Keys & Polite Pool + Desktop Alerts (cols: 6) */}
-            <div className="lg:col-span-6 flex flex-col gap-6">
-              {/* API Keys & Polite Pool */}
-              <div className="border border-zinc-200 dark:border-zinc-800 p-5 bg-white dark:bg-zinc-950/10 rounded flex flex-col gap-6">
-                <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-2">
-                  <span className="text-sm font-mono font-bold uppercase tracking-wider text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
-                    <Key className="h-4 w-4 text-zinc-500" />
-                    API Keys & Polite Pool
-                  </span>
-                </div>
-
-                <div className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[11px] font-mono uppercase text-zinc-400 font-bold">
-                      OpenAlex API Keys (Comma-separated for rotation)
-                    </label>
-                    <input
-                      type="text"
-                      value={apiKeysStr}
-                      onChange={(e) => setApiKeysStr(e.target.value)}
-                      placeholder="Key1, Key2, Key3..."
-                      className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2.5 rounded font-mono text-xs focus:outline-none"
-                    />
-                    <span className="text-[9px] text-zinc-400 font-sans leading-normal">
-                      If multiple keys are set, Stratum rotates queries across them and
-                      automatically sets aside keys that encounter quota exceptions.
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5 mt-1 border-t border-zinc-200 dark:border-zinc-800 pt-3">
-                    <label className="text-[11px] font-mono uppercase text-zinc-400 font-bold">
-                      Polite Pool Email Address (Contact UserAgent)
-                    </label>
-                    <input
-                      type="email"
-                      value={apiEmail}
-                      onChange={(e) => setApiEmail(e.target.value)}
-                      placeholder="your.name@institution.edu"
-                      className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2.5 rounded font-mono text-xs focus:outline-none"
-                    />
-                    <span className="text-[9px] text-zinc-400 font-sans leading-normal">
-                      OpenAlex reserves a dedicated "polite pool" with faster response times for
-                      users who send their contact email in the headers.
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Desktop Notifications Panel */}
-              <div className="flex flex-col gap-4 border border-zinc-200 dark:border-zinc-800 p-5 rounded bg-white dark:bg-zinc-950/10">
-                <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-2">
-                  <span className="text-xs font-mono font-bold uppercase tracking-wider text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
-                    <Bell className="h-4 w-4 text-zinc-500 animate-pulse" />
-                    Desktop Alerts Setting
-                  </span>
-                  {notificationPermission === 'granted' ? (
-                    <span className="px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 border border-emerald-200/50 font-mono text-[9px] font-bold uppercase">
-                      Enabled
-                    </span>
-                  ) : notificationPermission === 'denied' ? (
-                    <span className="px-2 py-0.5 rounded bg-red-50 dark:bg-red-950/20 text-red-600 border border-red-200/50 font-mono text-[9px] font-bold uppercase">
-                      Blocked
-                    </span>
-                  ) : notificationPermission === 'unsupported' ? (
-                    <span className="px-2 py-0.5 rounded bg-zinc-100 text-zinc-500 font-mono text-[9px] font-bold uppercase">
-                      Unsupported
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/20 text-amber-600 border border-amber-200/50 font-mono text-[9px] font-bold uppercase">
-                      Setup needed
-                    </span>
-                  )}
-                </div>
-
-                <p className="text-[11px] text-zinc-400 font-sans leading-relaxed">
-                  Receive browser push alerts when long-running search calculations, topic details
-                  fetches, or pipeline syncs finish, so you are immediately notified even when
-                  working in other tabs.
-                </p>
-
-                <div className="flex flex-col gap-3 mt-1">
-                  {notificationPermission === 'default' && (
-                    <button
-                      type="button"
-                      onClick={requestNotificationPermission}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-zinc-300 dark:border-zinc-800 rounded font-mono text-xs font-bold uppercase bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer transition select-none"
-                    >
-                      <Bell className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
-                      Request Notification Permission
-                    </button>
-                  )}
-
-                  {notificationPermission === 'granted' && (
-                    <div className="flex flex-col gap-3">
-                      <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 font-semibold">
-                        <Check className="h-3.5 w-3.5 shrink-0" /> Desktop notifications are fully
-                        configured and ready.
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          sendNotification(
-                            'Stratum Notification',
-                            'Desktop notifications are working properly!',
-                          )
-                        }
-                        className="self-start px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded font-mono text-[10px] font-bold uppercase hover:bg-zinc-50 dark:hover:bg-zinc-850 text-zinc-600 dark:text-zinc-400 cursor-pointer transition"
-                      >
-                        Send Test Notification
-                      </button>
-                    </div>
-                  )}
-
-                  {notificationPermission === 'denied' && (
-                    <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 flex items-center gap-1.5 leading-normal">
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0" /> Notifications are blocked.
-                      Please enable them in your browser site settings to receive completion alerts.
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* RIGHT COLUMN: Search Constraints & Filtering + Environment (cols: 6) */}
-            <div className="lg:col-span-6 flex flex-col gap-6">
-              {/* Search Constraints & Filtering */}
-              <div className="flex flex-col gap-5 border border-zinc-200 dark:border-zinc-800 p-5 rounded bg-white dark:bg-zinc-950/10">
-                <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-2">
-                  <span className="text-sm font-mono font-bold uppercase tracking-wider text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-zinc-500" />
-                    Search Constraints & Filtering
-                  </span>
-                </div>
-
-                {/* Date Filters */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[11px] font-mono uppercase text-zinc-500 font-bold">
-                      Publication Date From
-                    </label>
-                    <input
-                      type="date"
-                      value={dateFrom}
-                      onChange={(e) => setDateFrom(e.target.value)}
-                      className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2 rounded font-mono text-xs focus:outline-none"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[11px] font-mono uppercase text-zinc-500 font-bold">
-                      Publication Date To
-                    </label>
-                    <input
-                      type="date"
-                      value={dateTo}
-                      onChange={(e) => setDateTo(e.target.value)}
-                      className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2 rounded font-mono text-xs focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                {/* Document Types Checkboxes */}
-                <div className="flex flex-col gap-2.5 mt-2 border-t border-zinc-200 dark:border-zinc-800 pt-4">
-                  <span className="text-[11px] font-mono uppercase text-zinc-500 font-bold">
-                    Target Document Types
-                  </span>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {Object.keys(selectedDocTypes).map((type) => (
-                      <label
-                        key={type}
-                        className={`flex items-center gap-2 p-2 rounded border border-zinc-200 dark:border-zinc-800/80 cursor-pointer select-none font-mono text-[11px] ${
-                          selectedDocTypes[type]
-                            ? 'bg-zinc-50/50 border-zinc-300 dark:bg-zinc-900/10 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 font-semibold'
-                            : 'bg-white dark:bg-zinc-950/20 hover:bg-zinc-50 dark:hover:bg-zinc-900/40 text-zinc-400'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedDocTypes[type]}
-                          onChange={() =>
-                            setSelectedDocTypes((prev) => ({
-                              ...prev,
-                              [type]: !prev[type],
-                            }))
-                          }
-                          className="rounded border-zinc-300 text-zinc-900 focus:ring-0 cursor-pointer"
-                        />
-                        <span className="capitalize">{type.replace('-', ' ')}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* AI & LLM Query Builder Settings */}
-              <div className="flex flex-col gap-4 border border-zinc-200 dark:border-zinc-800 p-5 rounded bg-white dark:bg-zinc-950/10">
-                <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-2">
-                  <span className="text-sm font-mono font-bold uppercase tracking-wider text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-amber-500" />
-                    AI Query Builder Configuration
-                  </span>
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  {/* Provider Selection */}
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-mono font-bold uppercase text-zinc-500">
-                      LLM Provider
-                    </label>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLlmProvider('gemini')
-                          localStorage.setItem('stratum_llm_provider', 'gemini')
-                        }}
-                        className={`flex-1 py-1.5 border rounded font-mono text-[10px] font-bold uppercase cursor-pointer transition ${
-                          llmProvider === 'gemini'
-                            ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950 border-zinc-800'
-                            : 'bg-transparent text-zinc-500 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900'
-                        }`}
-                      >
-                        Gemini API
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLlmProvider('ollama')
-                          localStorage.setItem('stratum_llm_provider', 'ollama')
-                        }}
-                        className={`flex-1 py-1.5 border rounded font-mono text-[10px] font-bold uppercase cursor-pointer transition ${
-                          llmProvider === 'ollama'
-                            ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950 border-zinc-800'
-                            : 'bg-transparent text-zinc-500 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900'
-                        }`}
-                      >
-                        Ollama (Local)
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Provider Config Fields */}
-                  {llmProvider === 'gemini' ? (
-                    <>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-mono font-bold uppercase text-zinc-500">
-                          Model Selection
-                        </label>
-                        <select
-                          value={llmModel}
-                          onChange={(e) => {
-                            setLlmModel(e.target.value)
-                            localStorage.setItem('stratum_gemini_model', e.target.value)
-                          }}
-                          className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2 rounded font-mono text-xs focus:outline-none"
-                        >
-                          <option value="gemini-3.6-flash">
-                            Gemini 3.6 Flash (Fastest & Recommended)
-                          </option>
-                          <option value="gemini-3.6-pro">Gemini 3.6 Pro (Deep Reasoning)</option>
-                          <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                          <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                          <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-                        </select>
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-mono font-bold uppercase text-zinc-500 flex items-center gap-1">
-                          <Key className="h-3 w-3" /> Gemini API Key
-                        </label>
-                        <input
-                          type="password"
-                          value={llmApiKey}
-                          onChange={(e) => {
-                            setLlmApiKey(e.target.value)
-                            localStorage.setItem('stratum_gemini_key', e.target.value)
-                          }}
-                          placeholder="Enter GEMINI_API_KEY..."
-                          className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2 rounded font-mono text-xs focus:outline-none"
-                        />
-                        <span className="text-[9px] text-zinc-400 font-sans">
-                          Used to classify extracted keywords into the 4-bucket bounded boolean
-                          schema.
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-mono font-bold uppercase text-zinc-500">
-                          Ollama Server URL
-                        </label>
-                        <input
-                          type="text"
-                          value={ollamaUrl}
-                          onChange={(e) => {
-                            setOllamaUrl(e.target.value)
-                            localStorage.setItem('stratum_ollama_url', e.target.value)
-                          }}
-                          placeholder="http://localhost:11434"
-                          className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2 rounded font-mono text-xs focus:outline-none"
-                        />
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-mono font-bold uppercase text-zinc-500">
-                          Ollama Model Name
-                        </label>
-                        <input
-                          type="text"
-                          value={ollamaModel}
-                          onChange={(e) => {
-                            setOllamaModel(e.target.value)
-                            localStorage.setItem('stratum_ollama_model', e.target.value)
-                          }}
-                          placeholder="e.g. qwen3:4b, llama3"
-                          className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2 rounded font-mono text-xs focus:outline-none"
-                        />
-                      </div>
-                    </>
-                  )}
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-mono font-bold uppercase text-zinc-500">
-                      Domain Context Hint (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={domainContext}
-                      onChange={(e) => setDomainContext(e.target.value)}
-                      placeholder="e.g. Quantum Computing, Materials Science"
-                      className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2 rounded font-mono text-xs focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Environment & Workspace Preferences */}
-              <div className="flex flex-col gap-4 border border-zinc-200 dark:border-zinc-800 p-5 rounded bg-white dark:bg-zinc-950/10">
-                <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-2">
-                  <span className="text-xs font-mono font-bold uppercase tracking-wider text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
-                    <Settings className="h-4 w-4 text-zinc-500" />
-                    Environment & Preferences
-                  </span>
-                </div>
-                <div className="flex flex-col gap-3 text-xs font-mono text-zinc-500">
-                  <div className="flex justify-between items-center py-2 border-b border-zinc-100 dark:border-zinc-900">
-                    <span>Active Workspace</span>
-                    <span className="font-bold text-zinc-800 dark:text-zinc-200">
-                      {activeProject || 'Default'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center py-2 border-b border-zinc-100 dark:border-zinc-900">
-                    <span>Browser Notification Support</span>
-                    <span className="font-bold text-zinc-800 dark:text-zinc-200">
-                      {typeof window !== 'undefined' && 'Notification' in window
-                        ? 'Supported'
-                        : 'Unavailable'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center py-2">
-                    <span>Toast Auto-Dismiss</span>
-                    <span className="font-bold text-zinc-800 dark:text-zinc-200">6 seconds</span>
-                  </div>
-                </div>
               </div>
             </div>
           </div>

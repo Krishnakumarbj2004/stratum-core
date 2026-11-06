@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"stratum/config"
@@ -537,6 +538,99 @@ func TestDownloadPapersWithOptions_NoTopics(t *testing.T) {
 	}
 	if strings.Contains(receivedFilter, "primary_topic.id") {
 		t.Errorf("expected filter to NOT contain topic IDs when NoTopics=true, got: %s", receivedFilter)
+	}
+}
+
+func TestDownloadPapersWithOptions_LargeQuerySplit(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "stratum_download_large_test_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	var requestURLs []string
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requestURLs = append(requestURLs, r.URL.String())
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		cursor := r.URL.Query().Get("cursor")
+		if cursor == "*" {
+			// Return a work
+			fmt.Fprintln(w, `{"meta":{"count":1,"next_cursor":"end"},"results":[{"id":"https://openalex.org/W_SPLIT","title":"Split Paper"}]}`)
+		} else {
+			fmt.Fprintln(w, `{"meta":{"count":1,"next_cursor":""},"results":[]}`)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(nil, "test@example.com", 2, 2, 2, 1)
+	client.baseURL = server.URL
+
+	// Synthesize a query with 50 OR clauses (exceeds 3500 encoded bytes)
+	var terms []string
+	for i := 0; i < 50; i++ {
+		terms = append(terms, fmt.Sprintf(`("wafer_semiconductor_fabrication_term_%03d" OR "silicon_process_layer_%03d")`, i, i))
+	}
+	largeQuery := "(" + strings.Join(terms, " OR\n") + ") NOT (cancer OR tumor)"
+
+	cfg := &config.AppConfig{
+		Keywords: largeQuery,
+		Topics:   nil,
+		Filters: config.FiltersConfig{
+			DateFrom: "2020-01-01",
+			DateTo:   "2023-12-31",
+		},
+	}
+
+	outputJSONL := filepath.Join(tmpDir, "output_large.jsonl")
+	stats, err := client.DownloadPapersWithOptions(context.Background(), cfg, outputJSONL, DownloadOptions{
+		NoTopics:    true,
+		Deduplicate: true,
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("DownloadPapersWithOptions with large query failed: %v", err)
+	}
+
+	mu.Lock()
+	urls := make([]string, len(requestURLs))
+	copy(urls, requestURLs)
+	mu.Unlock()
+
+	for _, u := range urls {
+		if len(u) > 4500 {
+			t.Errorf("request URL exceeds safe limit: %d > 4500", len(u))
+		}
+	}
+
+	// Should deduplicate W_SPLIT to 1 paper collected despite multiple chunks
+	if stats.Collected != 1 {
+		t.Errorf("expected 1 unique paper collected across chunks, got %d", stats.Collected)
+	}
+}
+
+func TestCleanDocTypesAndBuildFilter(t *testing.T) {
+	types := []string{"article", "review", "proceedings-article"}
+	cleaned := CleanDocTypes(types)
+	expectedClean := []string{"article", "review", "conference-paper"}
+	if len(cleaned) != len(expectedClean) {
+		t.Fatalf("expected len %d, got %d", len(expectedClean), len(cleaned))
+	}
+	for i, v := range expectedClean {
+		if cleaned[i] != v {
+			t.Errorf("at index %d: expected %s, got %s", i, v, cleaned[i])
+		}
+	}
+
+	filter := BuildFilter("test", nil, "2020-01-01", "2024-12-31", types)
+	if strings.Contains(filter, "proceedings-article") {
+		t.Errorf("filter should not contain proceedings-article: %s", filter)
+	}
+	if !strings.Contains(filter, "type:article|review|conference-paper") {
+		t.Errorf("filter missing conference-paper: %s", filter)
 	}
 }
 

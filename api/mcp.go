@@ -458,32 +458,38 @@ func (s *APIServer) handleSearch(ctx context.Context, req *mcp.CallToolRequest, 
 
 	client := openalex.NewClient(cfg.API.Keys, cfg.API.Email, cfg.Collection.PerPage, cfg.Collection.ConcurrentRequests, cfg.Collection.MaxRetries, cfg.Collection.RetryDelay)
 
-	parts := []string{"title_and_abstract.search:" + keywords}
-	if len(topics) > 0 {
-		parts = append(parts, "primary_topic.id:"+strings.Join(topics, "|"))
-	}
-	dateFrom := cfg.Filters.DateFrom
-	if dateFrom == "" {
-		dateFrom = "2003-01-01"
-	}
-	dateTo := cfg.Filters.DateTo
-	if dateTo == "" {
-		dateTo = "2024-12-31"
-	}
-	parts = append(parts, "from_publication_date:"+dateFrom)
-	parts = append(parts, "to_publication_date:"+dateTo)
-	if len(cfg.Filters.DocTypes) > 0 {
-		parts = append(parts, "type:"+strings.Join(cfg.Filters.DocTypes, "|"))
-	}
-	filter := strings.Join(parts, ",")
+	chunks := openalex.SplitQuery(keywords, 3500)
+	var count int
+	for _, chunk := range chunks {
+		parts := []string{"title_and_abstract.search:" + chunk}
+		if len(topics) > 0 {
+			parts = append(parts, "primary_topic.id:"+strings.Join(topics, "|"))
+		}
+		dateFrom := cfg.Filters.DateFrom
+		if dateFrom == "" {
+			dateFrom = "2003-01-01"
+		}
+		dateTo := cfg.Filters.DateTo
+		if dateTo == "" {
+			dateTo = "2024-12-31"
+		}
+		parts = append(parts, "from_publication_date:"+dateFrom)
+		parts = append(parts, "to_publication_date:"+dateTo)
+		cleanDocTypes := openalex.CleanDocTypes(cfg.Filters.DocTypes)
+		if len(cleanDocTypes) > 0 {
+			parts = append(parts, "type:"+strings.Join(cleanDocTypes, "|"))
+		}
+		filter := strings.Join(parts, ",")
 
-	count, err := client.GetTotalCount(ctx, filter)
-	if err != nil {
-		errStr := "OpenAlex search request failed: " + err.Error()
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: errStr}},
-			IsError: true,
-		}, SearchResult{}, nil
+		c, err := client.GetTotalCount(ctx, filter)
+		if err != nil {
+			errStr := "OpenAlex search request failed: " + err.Error()
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: errStr}},
+				IsError: true,
+			}, SearchResult{}, nil
+		}
+		count += c
 	}
 
 	var anchors []string
@@ -508,15 +514,47 @@ func (s *APIServer) handleSearch(ctx context.Context, req *mcp.CallToolRequest, 
 					end = len(anchors)
 				}
 				batch := anchors[i:end]
-				batchFilter := strings.Join(batch, "|")
-				combinedFilter := filter + ",doi:" + batchFilter
 
-				resp, err := client.FetchPage(ctx, combinedFilter, "*")
-				if err == nil && resp != nil {
-					for _, w := range resp.Results {
-						norm := normalizeDOI(w.DOI)
-						if norm != "" {
-							matchedSet[norm] = true
+				for _, chunk := range chunks {
+					var pendingBatch []string
+					for _, d := range batch {
+						if !matchedSet[d] {
+							pendingBatch = append(pendingBatch, d)
+						}
+					}
+					if len(pendingBatch) == 0 {
+						break
+					}
+
+					batchFilter := strings.Join(pendingBatch, "|")
+					parts := []string{"title_and_abstract.search:" + chunk}
+					if len(topics) > 0 {
+						parts = append(parts, "primary_topic.id:"+strings.Join(topics, "|"))
+					}
+					dateFrom := cfg.Filters.DateFrom
+					if dateFrom == "" {
+						dateFrom = "2003-01-01"
+					}
+					dateTo := cfg.Filters.DateTo
+					if dateTo == "" {
+						dateTo = "2024-12-31"
+					}
+					parts = append(parts, "from_publication_date:"+dateFrom)
+					parts = append(parts, "to_publication_date:"+dateTo)
+					cleanDocTypes := openalex.CleanDocTypes(cfg.Filters.DocTypes)
+					if len(cleanDocTypes) > 0 {
+						parts = append(parts, "type:"+strings.Join(cleanDocTypes, "|"))
+					}
+					parts = append(parts, "doi:"+batchFilter)
+					combinedFilter := strings.Join(parts, ",")
+
+					resp, err := client.FetchPage(ctx, combinedFilter, "*")
+					if err == nil && resp != nil {
+						for _, w := range resp.Results {
+							norm := normalizeDOI(w.DOI)
+							if norm != "" {
+								matchedSet[norm] = true
+							}
 						}
 					}
 				}
@@ -884,8 +922,9 @@ func (s *APIServer) handleGetTopics(ctx context.Context, req *mcp.CallToolReques
 	}
 	parts = append(parts, "from_publication_date:"+dateFrom)
 	parts = append(parts, "to_publication_date:"+dateTo)
-	if len(cfg.Filters.DocTypes) > 0 {
-		parts = append(parts, "type:"+strings.Join(cfg.Filters.DocTypes, "|"))
+	cleanDocTypes := openalex.CleanDocTypes(cfg.Filters.DocTypes)
+	if len(cleanDocTypes) > 0 {
+		parts = append(parts, "type:"+strings.Join(cleanDocTypes, "|"))
 	}
 	filter := strings.Join(parts, ",")
 
@@ -1767,25 +1806,57 @@ func (s *APIServer) handleGetSampleMCP(ctx context.Context, req *mcp.CallToolReq
 
 	client := openalex.NewClient(cfg.API.Keys, cfg.API.Email, 200, 5, 3, 1)
 
-	parts := []string{"title_and_abstract.search:" + cfg.Keywords}
-	if len(cfg.Topics) > 0 {
-		parts = append(parts, "primary_topic.id:"+strings.Join(cfg.Topics, "|"))
-	}
-	parts = append(parts, "from_publication_date:"+cfg.Filters.DateFrom)
-	parts = append(parts, "to_publication_date:"+cfg.Filters.DateTo)
-	if len(cfg.Filters.DocTypes) > 0 {
-		parts = append(parts, "type:"+strings.Join(cfg.Filters.DocTypes, "|"))
-	}
-	apiFilter := strings.Join(parts, ",")
+	chunks := openalex.SplitQuery(cfg.Keywords, 3500)
+	var count int
+	var samples []openalex.Work
+	seenIDs := make(map[string]bool)
 
-	count, err := client.GetTotalCount(ctx, apiFilter)
-	if err != nil {
-		count = 0
+	samplePerChunk := size
+	if len(chunks) > 1 {
+		samplePerChunk = (size + len(chunks) - 1) / len(chunks)
+		if samplePerChunk < 10 {
+			samplePerChunk = 10
+		}
 	}
 
-	samples, err := client.FetchSample(ctx, apiFilter, size, 42)
-	if err != nil {
-		return nil, GetSampleResult{}, fmt.Errorf("failed to fetch sample from OpenAlex: %w", err)
+	for _, chunk := range chunks {
+		parts := []string{"title_and_abstract.search:" + chunk}
+		if len(cfg.Topics) > 0 {
+			parts = append(parts, "primary_topic.id:"+strings.Join(cfg.Topics, "|"))
+		}
+		parts = append(parts, "from_publication_date:"+cfg.Filters.DateFrom)
+		parts = append(parts, "to_publication_date:"+cfg.Filters.DateTo)
+		cleanDocTypes := openalex.CleanDocTypes(cfg.Filters.DocTypes)
+		if len(cleanDocTypes) > 0 {
+			parts = append(parts, "type:"+strings.Join(cleanDocTypes, "|"))
+		}
+		apiFilter := strings.Join(parts, ",")
+
+		c, err := client.GetTotalCount(ctx, apiFilter)
+		if err == nil {
+			count += c
+		}
+
+		if len(samples) < size {
+			needed := size - len(samples)
+			targetLimit := needed
+			if len(chunks) > 1 && targetLimit > samplePerChunk {
+				targetLimit = samplePerChunk
+			}
+
+			chunkSamples, err := client.FetchSample(ctx, apiFilter, targetLimit, 42)
+			if err == nil {
+				for _, w := range chunkSamples {
+					if !seenIDs[w.ID] {
+						seenIDs[w.ID] = true
+						samples = append(samples, w)
+						if len(samples) >= size {
+							break
+						}
+					}
+				}
+			}
+		}
 	}
 
 	csvFilename := fmt.Sprintf("%s_sample.csv", project)

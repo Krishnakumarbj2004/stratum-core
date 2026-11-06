@@ -458,13 +458,12 @@ func (s *APIServer) getConfigDB(project string) (*sql.DB, error) {
 	}
 
 	if count == 0 {
-		// Default config values. Credentials are intentionally empty:
-		// users enter their own in Settings (or set STRATUM_OPENALEX_EMAIL / STRATUM_OPENALEX_KEYS).
+		// Default config values
 		email := os.Getenv("STRATUM_OPENALEX_EMAIL")
 		apiKeys := os.Getenv("STRATUM_OPENALEX_KEYS")
 		dateFrom := "2003-01-01"
 		dateTo := "2024-12-31"
-		docTypes := "article,review,proceedings-article"
+		docTypes := "article,review,conference-paper"
 		batchSizeTopics := 10
 		perPage := 200
 		concurrentRequests := 10
@@ -475,9 +474,27 @@ func (s *APIServer) getConfigDB(project string) (*sql.DB, error) {
 		llmBaseURL := "http://localhost:11434"
 		var keywords, topics, anchors string
 
+		// If this is a non-default project, inherit global credentials/filters from default project
+		if project != "" && project != "default" {
+			s.mu.Lock()
+			defDB := s.configDBs["default"]
+			if defDB == nil {
+				defDB = s.configDBs[""]
+			}
+			s.mu.Unlock()
+			if defDB != nil {
+				_ = defDB.QueryRow(`SELECT email, api_keys, date_from, date_to, doc_types,
+					llm_provider, llm_model, llm_base_url
+					FROM config WHERE id = 1`).Scan(
+					&email, &apiKeys, &dateFrom, &dateTo, &docTypes,
+					&llmProvider, &llmModel, &llmBaseURL,
+				)
+			}
+		}
+
 		// Auto-migrate from legacy collection.yml if it exists
 		var legacyYmlPath string
-		if project == "default" {
+		if project == "" || project == "default" {
 			legacyYmlPath = "config/collection.yml"
 		} else {
 			legacyYmlPath = filepath.Join("projects", project, "config", "collection.yml")
@@ -485,11 +502,21 @@ func (s *APIServer) getConfigDB(project string) (*sql.DB, error) {
 
 		if _, err := os.Stat(legacyYmlPath); err == nil {
 			if cfg, err := config.LoadConfig(legacyYmlPath); err == nil {
-				email = cfg.API.Email
-				apiKeys = strings.Join(cfg.API.Keys, ",")
-				dateFrom = cfg.Filters.DateFrom
-				dateTo = cfg.Filters.DateTo
-				docTypes = strings.Join(cfg.Filters.DocTypes, ",")
+				if cfg.API.Email != "" {
+					email = cfg.API.Email
+				}
+				if len(cfg.API.Keys) > 0 {
+					apiKeys = strings.Join(cfg.API.Keys, ",")
+				}
+				if cfg.Filters.DateFrom != "" {
+					dateFrom = cfg.Filters.DateFrom
+				}
+				if cfg.Filters.DateTo != "" {
+					dateTo = cfg.Filters.DateTo
+				}
+				if len(cfg.Filters.DocTypes) > 0 {
+					docTypes = strings.Join(cfg.Filters.DocTypes, ",")
+				}
 				batchSizeTopics = cfg.Collection.BatchSizeTopics
 				perPage = cfg.Collection.PerPage
 				concurrentRequests = cfg.Collection.ConcurrentRequests
@@ -528,6 +555,30 @@ func (s *APIServer) getConfigDB(project string) (*sql.DB, error) {
 	s.mu.Unlock()
 
 	return dbConn, nil
+}
+
+// syncGlobalSettings synchronizes common global credentials and search constraints
+// across default and all active projects in memory so the user doesn't have to re-enter them.
+func (s *APIServer) syncGlobalSettings(cfg *config.AppConfig) {
+	if cfg == nil {
+		return
+	}
+
+	apiKeys := strings.Join(cfg.API.Keys, ",")
+	docTypes := strings.Join(cfg.Filters.DocTypes, ",")
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, dbConn := range s.configDBs {
+		if dbConn != nil {
+			_, _ = dbConn.Exec(`UPDATE config SET 
+				email = ?, api_keys = ?, date_from = ?, date_to = ?, doc_types = ?
+				WHERE id = 1`,
+				cfg.API.Email, apiKeys, cfg.Filters.DateFrom, cfg.Filters.DateTo, docTypes,
+			)
+		}
+	}
 }
 
 func (s *APIServer) ensureProjectDirs(project string) error {
