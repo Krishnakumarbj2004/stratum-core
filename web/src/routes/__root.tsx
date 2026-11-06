@@ -12,7 +12,7 @@ import {
   AlertTriangle,
   Download,
   CheckCircle2,
-  TrendingUp,
+  Sliders,
 } from 'lucide-react'
 import { ProjectContext } from '../context/ProjectContext'
 
@@ -186,9 +186,7 @@ export function Root() {
             </div>
             <div className="flex flex-col">
               <span className="font-mono font-bold text-sm tracking-tight">Stratum Core</span>
-              <span className="text-[10px] font-mono text-zinc-500 font-semibold uppercase tracking-wider">
-                Version 5.0.1
-              </span>
+             
             </div>
           </div>
 
@@ -275,7 +273,7 @@ export function Root() {
               }}
               className="flex items-center gap-3 px-3 py-2.5 rounded text-xs font-mono uppercase tracking-wider transition-all"
             >
-              <Settings className="h-4 w-4" />
+              <Sliders className="h-4 w-4" />
               <span>Ingest Config</span>
             </Link>
 
@@ -328,7 +326,7 @@ export function Root() {
             </Link>
 
             <Link
-              to="/insights"
+              to="/settings"
               activeProps={{
                 className:
                   'bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-semibold',
@@ -339,8 +337,8 @@ export function Root() {
               }}
               className="flex items-center gap-3 px-3 py-2.5 rounded text-xs font-mono uppercase tracking-wider transition-all"
             >
-              <TrendingUp className="h-4 w-4" />
-              <span>Insights</span>
+              <Settings className="h-4 w-4" />
+              <span>Settings</span>
             </Link>
 
             <Link

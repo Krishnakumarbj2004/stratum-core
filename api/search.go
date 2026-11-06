@@ -144,6 +144,31 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Fallback: If this non-default project has empty API keys or email, fallback to default project
+		if (len(cfg.API.Keys) == 0 || cfg.API.Email == "") && project != "" && project != "default" {
+			s.mu.Lock()
+			defDB := s.configDBs["default"]
+			if defDB == nil {
+				defDB = s.configDBs[""]
+			}
+			s.mu.Unlock()
+			if defDB != nil {
+				var dEmail, dKeys string
+				if err := defDB.QueryRow("SELECT email, api_keys FROM config WHERE id = 1").Scan(&dEmail, &dKeys); err == nil {
+					if len(cfg.API.Keys) == 0 && dKeys != "" {
+						for _, k := range strings.Split(dKeys, ",") {
+							if trimmed := strings.TrimSpace(k); trimmed != "" {
+								cfg.API.Keys = append(cfg.API.Keys, trimmed)
+							}
+						}
+					}
+					if cfg.API.Email == "" && dEmail != "" {
+						cfg.API.Email = dEmail
+					}
+				}
+			}
+		}
+
 		cfg.Output.JSONLDir = jsonlDir
 		cfg.Output.DBDir = dbDir
 
@@ -230,6 +255,9 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to save config to DB: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		// Propagate global settings (API keys, polite pool email, date range, doc types) across all projects
+		s.syncGlobalSettings(&payload.Config)
 
 		// Append revision to history in DB
 		_ = s.appendConfigRevision(configDB, payload.Keywords, payload.Topics, payload.Anchors, payload.Label)
@@ -1271,29 +1299,41 @@ func (s *APIServer) handleOpenAlexCount(w http.ResponseWriter, r *http.Request) 
 	// Instantiate client
 	client := openalex.NewClient(req.Keys, req.Email, 200, 1, 3, 1)
 
-	// Build the API filter query
-	parts := []string{"title_and_abstract.search:" + req.Query}
+	// Build valid topics
 	var validTopics []string
 	for _, t := range req.Topics {
 		if openalex.ValidateTopicFormat(t) {
 			validTopics = append(validTopics, t)
 		}
 	}
-	if len(validTopics) > 0 {
-		parts = append(parts, "primary_topic.id:"+strings.Join(validTopics, "|"))
-	}
-	parts = append(parts, "from_publication_date:"+req.DateFrom)
-	parts = append(parts, "to_publication_date:"+req.DateTo)
-	if len(req.DocTypes) > 0 {
-		parts = append(parts, "type:"+strings.Join(req.DocTypes, "|"))
-	}
-	filter := strings.Join(parts, ",")
 
-	count, err := client.GetTotalCount(r.Context(), filter)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "OpenAlex request failed: " + err.Error()})
-		return
+	chunks := openalex.SplitQuery(req.Query, 3500)
+	var count int
+	var displayFilter string
+
+	for idx, chunk := range chunks {
+		parts := []string{"title_and_abstract.search:" + chunk}
+		if len(validTopics) > 0 {
+			parts = append(parts, "primary_topic.id:"+strings.Join(validTopics, "|"))
+		}
+		parts = append(parts, "from_publication_date:"+req.DateFrom)
+		parts = append(parts, "to_publication_date:"+req.DateTo)
+		cleanDocTypes := openalex.CleanDocTypes(req.DocTypes)
+		if len(cleanDocTypes) > 0 {
+			parts = append(parts, "type:"+strings.Join(cleanDocTypes, "|"))
+		}
+		chunkFilter := strings.Join(parts, ",")
+		if idx == 0 {
+			displayFilter = chunkFilter
+		}
+
+		c, err := client.GetTotalCount(r.Context(), chunkFilter)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "OpenAlex request failed: " + err.Error()})
+			return
+		}
+		count += c
 	}
 
 	// Load anchors from config
@@ -1326,18 +1366,40 @@ func (s *APIServer) handleOpenAlexCount(w http.ResponseWriter, r *http.Request) 
 					end = len(anchors)
 				}
 				batch := anchors[i:end]
-				batchFilter := strings.Join(batch, "|")
 
-				// Combine filter: queryFilter + ",doi:" + batchFilter
-				combinedFilter := filter + ",doi:" + batchFilter
+				for _, chunk := range chunks {
+					var pendingBatch []string
+					for _, d := range batch {
+						if !matchedSet[d] {
+							pendingBatch = append(pendingBatch, d)
+						}
+					}
+					if len(pendingBatch) == 0 {
+						break
+					}
 
-				// Query OpenAlex works for matching DOIs in this batch
-				resp, err := client.FetchPage(r.Context(), combinedFilter, "*")
-				if err == nil && resp != nil {
-					for _, w := range resp.Results {
-						norm := normalizeDOI(w.DOI)
-						if norm != "" {
-							matchedSet[norm] = true
+					batchFilter := strings.Join(pendingBatch, "|")
+					parts := []string{"title_and_abstract.search:" + chunk}
+					if len(validTopics) > 0 {
+						parts = append(parts, "primary_topic.id:"+strings.Join(validTopics, "|"))
+					}
+					parts = append(parts, "from_publication_date:"+req.DateFrom)
+					parts = append(parts, "to_publication_date:"+req.DateTo)
+					cleanDocTypes := openalex.CleanDocTypes(req.DocTypes)
+					if len(cleanDocTypes) > 0 {
+						parts = append(parts, "type:"+strings.Join(cleanDocTypes, "|"))
+					}
+					parts = append(parts, "doi:"+batchFilter)
+					combinedFilter := strings.Join(parts, ",")
+
+					// Query OpenAlex works for matching DOIs in this batch
+					resp, err := client.FetchPage(r.Context(), combinedFilter, "*")
+					if err == nil && resp != nil {
+						for _, w := range resp.Results {
+							norm := normalizeDOI(w.DOI)
+							if norm != "" {
+								matchedSet[norm] = true
+							}
 						}
 					}
 				}
@@ -1355,7 +1417,7 @@ func (s *APIServer) handleOpenAlexCount(w http.ResponseWriter, r *http.Request) 
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"count":           count,
-		"filter":          filter,
+		"filter":          displayFilter,
 		"anchors_total":   len(anchors),
 		"anchors_matched": matchedCount,
 		"anchors_missing": missingDOIs,
@@ -1411,31 +1473,65 @@ func (s *APIServer) handleOpenAlexSample(w http.ResponseWriter, r *http.Request)
 	// Instantiate client
 	client := openalex.NewClient(req.Keys, req.Email, 200, 5, 3, 1)
 
-	// Build the API filter query
-	parts := []string{"title_and_abstract.search:" + req.Query}
+	// Build valid topics
 	var validTopics []string
 	for _, t := range req.Topics {
 		if openalex.ValidateTopicFormat(t) {
 			validTopics = append(validTopics, t)
 		}
 	}
-	if len(validTopics) > 0 {
-		parts = append(parts, "primary_topic.id:"+strings.Join(validTopics, "|"))
-	}
-	parts = append(parts, "from_publication_date:"+req.DateFrom)
-	parts = append(parts, "to_publication_date:"+req.DateTo)
-	if len(req.DocTypes) > 0 {
-		parts = append(parts, "type:"+strings.Join(req.DocTypes, "|"))
-	}
-	filter := strings.Join(parts, ",")
 
-	// Fetch sample works (passing 0 for seed triggers automatic generation of a time-based random seed)
-	works, err := client.FetchSample(r.Context(), filter, req.SampleSize, 0)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "OpenAlex sample request failed: " + err.Error()})
-		return
+	chunks := openalex.SplitQuery(req.Query, 3500)
+	var works []openalex.Work
+	seenIDs := make(map[string]bool)
+
+	samplePerChunk := req.SampleSize
+	if len(chunks) > 1 {
+		samplePerChunk = (req.SampleSize + len(chunks) - 1) / len(chunks)
+		if samplePerChunk < 10 {
+			samplePerChunk = 10
+		}
+	}
+
+	for _, chunk := range chunks {
+		if len(works) >= req.SampleSize {
+			break
+		}
+		parts := []string{"title_and_abstract.search:" + chunk}
+		if len(validTopics) > 0 {
+			parts = append(parts, "primary_topic.id:"+strings.Join(validTopics, "|"))
+		}
+		parts = append(parts, "from_publication_date:"+req.DateFrom)
+		parts = append(parts, "to_publication_date:"+req.DateTo)
+		cleanDocTypes := openalex.CleanDocTypes(req.DocTypes)
+		if len(cleanDocTypes) > 0 {
+			parts = append(parts, "type:"+strings.Join(cleanDocTypes, "|"))
+		}
+		filter := strings.Join(parts, ",")
+
+		needed := req.SampleSize - len(works)
+		targetLimit := needed
+		if len(chunks) > 1 && targetLimit > samplePerChunk {
+			targetLimit = samplePerChunk
+		}
+
+		chunkWorks, err := client.FetchSample(r.Context(), filter, targetLimit, 0)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "OpenAlex sample request failed: " + err.Error()})
+			return
+		}
+
+		for _, p := range chunkWorks {
+			if !seenIDs[p.ID] {
+				seenIDs[p.ID] = true
+				works = append(works, p)
+				if len(works) >= req.SampleSize {
+					break
+				}
+			}
+		}
 	}
 
 	// Format as CSV
@@ -1823,52 +1919,71 @@ func (s *APIServer) handleOpenAlexTopics(w http.ResponseWriter, r *http.Request)
 	// Instantiate client
 	client := openalex.NewClient(req.Keys, req.Email, 200, 4, 3, 1)
 
-	// Build the API filter query
-	parts := []string{"title_and_abstract.search:" + req.Query}
+	// Build valid topics
 	var validTopics []string
 	for _, t := range req.Topics {
 		if openalex.ValidateTopicFormat(t) {
 			validTopics = append(validTopics, t)
 		}
 	}
-	if len(validTopics) > 0 {
-		parts = append(parts, "primary_topic.id:"+strings.Join(validTopics, "|"))
-	}
-	parts = append(parts, "from_publication_date:"+req.DateFrom)
-	parts = append(parts, "to_publication_date:"+req.DateTo)
-	if len(req.DocTypes) > 0 {
-		parts = append(parts, "type:"+strings.Join(req.DocTypes, "|"))
-	}
-	filter := strings.Join(parts, ",")
 
-	// Fetch topic groups using cursor pagination (capped to top 200)
-	var allGroups []openalex.GroupByItem
-	cursor := "*"
-	for len(allGroups) < 200 {
-		if r.Context().Err() != nil {
-			return
+	chunks := openalex.SplitQuery(req.Query, 3500)
+	groupMap := make(map[string]*openalex.GroupByItem)
+
+	for _, chunk := range chunks {
+		parts := []string{"title_and_abstract.search:" + chunk}
+		if len(validTopics) > 0 {
+			parts = append(parts, "primary_topic.id:"+strings.Join(validTopics, "|"))
 		}
-		resp, err := client.FetchGroupBy(r.Context(), filter, "primary_topic.id", cursor)
-		if err != nil {
+		parts = append(parts, "from_publication_date:"+req.DateFrom)
+		parts = append(parts, "to_publication_date:"+req.DateTo)
+		cleanDocTypes := openalex.CleanDocTypes(req.DocTypes)
+		if len(cleanDocTypes) > 0 {
+			parts = append(parts, "type:"+strings.Join(cleanDocTypes, "|"))
+		}
+		filter := strings.Join(parts, ",")
+
+		cursor := "*"
+		chunkCount := 0
+		for chunkCount < 200 {
 			if r.Context().Err() != nil {
 				return
 			}
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "OpenAlex request failed: " + err.Error()})
-			return
+			resp, err := client.FetchGroupBy(r.Context(), filter, "primary_topic.id", cursor)
+			if err != nil {
+				if r.Context().Err() != nil {
+					return
+				}
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "OpenAlex request failed: " + err.Error()})
+				return
+			}
+			if resp == nil || len(resp.GroupBy) == 0 {
+				break
+			}
+			for _, g := range resp.GroupBy {
+				if existing, ok := groupMap[g.Key]; ok {
+					existing.Count += g.Count
+				} else {
+					copyG := g
+					groupMap[g.Key] = &copyG
+				}
+			}
+			chunkCount += len(resp.GroupBy)
+			if resp.Meta.NextCursor == "" || resp.Meta.NextCursor == cursor {
+				break
+			}
+			cursor = resp.Meta.NextCursor
 		}
-		if resp == nil || len(resp.GroupBy) == 0 {
-			break
-		}
-		allGroups = append(allGroups, resp.GroupBy...)
-		if resp.Meta.NextCursor == "" || resp.Meta.NextCursor == cursor {
-			break
-		}
-		cursor = resp.Meta.NextCursor
 	}
 
 	if r.Context().Err() != nil {
 		return
+	}
+
+	var allGroups []openalex.GroupByItem
+	for _, g := range groupMap {
+		allGroups = append(allGroups, *g)
 	}
 
 	// Sort groups by count descending

@@ -385,17 +385,22 @@ func (s *APIServer) handleDownloadInfo(w http.ResponseWriter, r *http.Request) {
 		docTypes = reqBody.DocTypes
 	}
 
-	filterStr := openalex.BuildFilter(keywords, topics, dateFrom, dateTo, docTypes)
+	chunks := openalex.SplitQuery(keywords, 3500)
 	client := openalex.NewClient(cfg.API.Keys, cfg.API.Email, cfg.Collection.PerPage, cfg.Collection.ConcurrentRequests, cfg.Collection.MaxRetries, cfg.Collection.RetryDelay)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	totalCount, err := client.GetTotalCount(ctx, filterStr)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to get paper count: " + err.Error()})
-		return
+	var totalCount int
+	for _, chunk := range chunks {
+		filterStr := openalex.BuildFilter(chunk, topics, dateFrom, dateTo, docTypes)
+		c, err := client.GetTotalCount(ctx, filterStr)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Failed to get paper count: " + err.Error()})
+			return
+		}
+		totalCount += c
 	}
 
 	estimatedMB := (float64(totalCount) * 8700.0) / (1024.0 * 1024.0)
@@ -547,14 +552,19 @@ func (s *APIServer) handleDownloadPapers(w http.ResponseWriter, r *http.Request)
 			}
 		}
 
-		filterStr := openalex.BuildFilter(cfg.Keywords, topics, cfg.Filters.DateFrom, cfg.Filters.DateTo, cfg.Filters.DocTypes)
+		chunks := openalex.SplitQuery(cfg.Keywords, 3500)
 		client := openalex.NewClient(cfg.API.Keys, cfg.API.Email, cfg.Collection.PerPage, cfg.Collection.ConcurrentRequests, cfg.Collection.MaxRetries, cfg.Collection.RetryDelay)
 
 		// Pre-flight estimation
-		totalCount, err := client.GetTotalCount(ctx, filterStr)
-		if err != nil {
-			s.updateStatus(project, false, 0, "[ERROR] Pre-flight estimation failed: "+err.Error())
-			return
+		var totalCount int
+		for _, chunk := range chunks {
+			filterStr := openalex.BuildFilter(chunk, topics, cfg.Filters.DateFrom, cfg.Filters.DateTo, cfg.Filters.DocTypes)
+			c, err := client.GetTotalCount(ctx, filterStr)
+			if err != nil {
+				s.updateStatus(project, false, 0, "[ERROR] Pre-flight estimation failed: "+err.Error())
+				return
+			}
+			totalCount += c
 		}
 
 		estimatedMB := (float64(totalCount) * 8700.0) / (1024.0 * 1024.0)

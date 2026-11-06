@@ -710,6 +710,74 @@ func TestOpenAlexTopicsRouteWithInvalidQuery(t *testing.T) {
 	}
 }
 
+func TestOpenAlexCount_LargeQuerySplit(t *testing.T) {
+	dbPath, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	server := NewAPIServer("localhost:8080", dbPath, "")
+	err := server.RegisterRoutes()
+	if err != nil {
+		t.Fatalf("RegisterRoutes failed: %v", err)
+	}
+
+	var reqCount int
+	var maxURLLen int
+
+	// Mock OpenAlex API to verify chunking
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount++
+		urlLen := len(r.URL.String())
+		if urlLen > maxURLLen {
+			maxURLLen = urlLen
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"meta":{"count":100,"next_cursor":""},"results":[]}`)
+	}))
+	defer ts.Close()
+
+	mockURL, _ := url.Parse(ts.URL)
+	origTransport := http.DefaultTransport
+	http.DefaultTransport = &redirectTransport{targetURL: mockURL, origTransport: origTransport}
+	defer func() { http.DefaultTransport = origTransport }()
+
+	// Synthesize a query with 50 OR clauses (exceeds 3500 encoded bytes)
+	var terms []string
+	for i := 0; i < 50; i++ {
+		terms = append(terms, fmt.Sprintf(`("wafer_semiconductor_fabrication_term_%03d" OR "silicon_process_layer_%03d")`, i, i))
+	}
+	largeQuery := "(" + strings.Join(terms, " OR\n") + ") NOT (cancer OR tumor)"
+
+	bodyJSON, _ := json.Marshal(map[string]interface{}{
+		"query": largeQuery,
+		"email": "test@example.com",
+	})
+
+	req := httptest.NewRequest("POST", "/api/openalex/count", bytes.NewBuffer(bodyJSON))
+	w := httptest.NewRecorder()
+	server.server.Handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	var res struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatalf("failed to parse response JSON: %v", err)
+	}
+
+	if reqCount < 2 {
+		t.Errorf("expected at least 2 chunk requests for large query, got %d", reqCount)
+	}
+	if maxURLLen > 4500 {
+		t.Errorf("expected max URL len <= 4500, got %d", maxURLLen)
+	}
+	if res.Count != reqCount*100 {
+		t.Errorf("expected aggregated count %d, got %d", reqCount*100, res.Count)
+	}
+}
+
 func TestPipelineRouteWithInvalidQuery(t *testing.T) {
 	dbPath, cleanup := setupTestEnv(t)
 	defer cleanup()

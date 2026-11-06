@@ -588,6 +588,27 @@ func (w *SafeWriter) Flush() error {
 	return w.writer.Flush()
 }
 
+// CleanDocTypes sanitizes document types, mapping legacy or provider-specific labels
+// such as "proceedings-article" (Crossref label) to valid OpenAlex types like "conference-paper".
+func CleanDocTypes(docTypes []string) []string {
+	if len(docTypes) == 0 {
+		return nil
+	}
+	clean := make([]string, 0, len(docTypes))
+	seen := make(map[string]bool)
+	for _, dt := range docTypes {
+		dt = strings.TrimSpace(dt)
+		if dt == "proceedings-article" {
+			dt = "conference-paper"
+		}
+		if dt != "" && !seen[dt] {
+			seen[dt] = true
+			clean = append(clean, dt)
+		}
+	}
+	return clean
+}
+
 func buildFilter(keywords string, topics []string, dateFrom string, dateTo string, docTypes []string) string {
 	parts := []string{"title_and_abstract.search:" + keywords}
 	if len(topics) > 0 {
@@ -599,8 +620,9 @@ func buildFilter(keywords string, topics []string, dateFrom string, dateTo strin
 	if dateTo != "" {
 		parts = append(parts, "to_publication_date:"+dateTo)
 	}
-	if len(docTypes) > 0 {
-		parts = append(parts, "type:"+strings.Join(docTypes, "|"))
+	cleanTypes := CleanDocTypes(docTypes)
+	if len(cleanTypes) > 0 {
+		parts = append(parts, "type:"+strings.Join(cleanTypes, "|"))
 	}
 	return strings.Join(parts, ",")
 }
@@ -728,7 +750,12 @@ func (c *OpenAlexClient) DownloadPapersWithOptions(
 	writer := NewSafeWriter(f)
 	defer writer.Flush()
 
-	var batches [][]string
+	kwChunks := SplitQuery(keywords, 3500)
+	if len(kwChunks) == 0 {
+		kwChunks = []string{keywords}
+	}
+
+	var topicBatches [][]string
 	batchSize := opts.BatchSizeTopics
 	if batchSize <= 0 {
 		batchSize = cfg.Collection.BatchSizeTopics
@@ -743,10 +770,24 @@ func (c *OpenAlexClient) DownloadPapersWithOptions(
 			if end > len(topics) {
 				end = len(topics)
 			}
-			batches = append(batches, topics[i:end])
+			topicBatches = append(topicBatches, topics[i:end])
 		}
 	} else {
-		batches = append(batches, nil)
+		topicBatches = append(topicBatches, nil)
+	}
+
+	type downloadBatch struct {
+		kwChunk string
+		topics  []string
+	}
+	var batches []downloadBatch
+	for _, kw := range kwChunks {
+		for _, tb := range topicBatches {
+			batches = append(batches, downloadBatch{
+				kwChunk: kw,
+				topics:  tb,
+			})
+		}
 	}
 
 	sem := make(chan struct{}, c.concurrentRequests)
@@ -757,7 +798,8 @@ func (c *OpenAlexClient) DownloadPapersWithOptions(
 
 	for i, batch := range batches {
 		batchIdx := i
-		batchData := batch
+		batchTopics := batch.topics
+		batchKW := batch.kwChunk
 
 		wg.Add(1)
 		go func() {
@@ -773,9 +815,9 @@ func (c *OpenAlexClient) DownloadPapersWithOptions(
 			err := c.processBatch(
 				ctx,
 				cfg,
-				batchData,
+				batchTopics,
 				batchIdx,
-				keywords,
+				batchKW,
 				topics,
 				writer,
 				&progressState,
@@ -882,14 +924,7 @@ func (c *OpenAlexClient) processBatch(
 
 	var filterStr string
 	if len(batch) > 0 {
-		fullTopicFilter := "primary_topic.id:" + strings.Join(allTopics, "|")
-		baseFilter := buildFilter(keywords, allTopics, cfg.Filters.DateFrom, cfg.Filters.DateTo, cfg.Filters.DocTypes)
-
-		if strings.Contains(baseFilter, fullTopicFilter) {
-			filterStr = strings.Replace(baseFilter, fullTopicFilter, "primary_topic.id:"+strings.Join(batch, "|"), 1)
-		} else {
-			filterStr = buildFilter(keywords, batch, cfg.Filters.DateFrom, cfg.Filters.DateTo, cfg.Filters.DocTypes)
-		}
+		filterStr = buildFilter(keywords, batch, cfg.Filters.DateFrom, cfg.Filters.DateTo, cfg.Filters.DocTypes)
 	} else {
 		filterStr = buildFilter(keywords, nil, cfg.Filters.DateFrom, cfg.Filters.DateTo, cfg.Filters.DocTypes)
 	}

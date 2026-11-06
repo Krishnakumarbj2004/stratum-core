@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Link } from '@tanstack/react-router'
 import {
   Download,
   FileText,
@@ -18,7 +17,6 @@ import {
   Archive,
   HardDrive,
   FileCode,
-  Sparkles,
   Info,
   ChevronDown,
   ChevronUp,
@@ -552,15 +550,7 @@ export function Export() {
         </div>
 
         <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-          <Link
-            to="/check-db"
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded text-xs font-mono font-bold border border-emerald-500/50 dark:border-emerald-500/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 cursor-pointer transition shadow-sm"
-            title="Open database completeness and health verification page (check-db)"
-          >
-            <Database className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span>Check DB</span>
-          </Link>
-
+          
           <button
             type="button"
             onClick={fetchFiles}
@@ -579,30 +569,7 @@ export function Export() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full">
         {/* LEFT COLUMN: Operation Mode & Execution Configuration (cols: 6) */}
         <div className="lg:col-span-6 flex flex-col gap-6">
-          {/* Mode Indicator Banner */}
-          <div className="flex flex-col gap-2">
-            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-400">
-              Operation Mode
-            </span>
-            <div className="flex items-center justify-between p-3.5 rounded border border-emerald-500/80 bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-950 dark:text-emerald-100 shadow-xs">
-              <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded bg-emerald-100 dark:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-700 dark:text-emerald-300 shrink-0">
-                  <Sparkles className="h-4 w-4" />
-                </div>
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-2 font-mono text-xs font-bold text-zinc-900 dark:text-zinc-100">
-                    <span>Full Pipeline</span>
-                    <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold uppercase bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                      Standard
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-zinc-600 dark:text-zinc-400 font-sans mt-0.5">
-                    End-to-end execution: JSONL → 5 Relational CSVs → SQLite (.db) + DuckDB
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
+          
 
           {/* Setup & Execution Card */}
           <div className="flex flex-col gap-4 border border-zinc-200 dark:border-zinc-800 p-5 rounded bg-white dark:bg-zinc-950/10 shadow-sm">
@@ -610,12 +577,10 @@ export function Export() {
               <div className="flex items-center gap-2">
                 <Layers className="h-4 w-4 text-zinc-900 dark:text-zinc-100" />
                 <span className="text-xs font-mono font-bold uppercase text-zinc-900 dark:text-zinc-100">
-                  Execution Parameters
+                  Execution
                 </span>
               </div>
-              <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-                json_to_csv.py
-              </span>
+            
             </div>
 
             {/* Input JSONL Selection */}
@@ -625,11 +590,7 @@ export function Export() {
                   <FileText className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                   Source JSONL File
                 </span>
-                {selectedJSONL && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
-                    <CheckCircle className="h-2.5 w-2.5" /> Auto-Selected
-                  </span>
-                )}
+             
               </div>
 
               <div className="flex items-center justify-between bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-3 py-2 rounded">
@@ -820,9 +781,7 @@ export function Export() {
                   Last Converted
                 </span>
               </div>
-              <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-                1-Click Browser Downloads
-              </span>
+            
             </div>
 
             {/* CSV Bundles (Only Last Converted) */}
@@ -961,15 +920,7 @@ export function Export() {
                       </div>
                     </button>
 
-                    <Link
-                      to="/check-db"
-                      search={{ file: latestDuckDBFile.name }}
-                      className="flex items-center justify-center gap-1.5 py-1.5 px-3 rounded border border-amber-500/40 dark:border-amber-500/50 bg-amber-50/70 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-mono text-[11px] font-bold uppercase transition cursor-pointer shadow-xs"
-                      title={`Open check-db health check page for ${latestDuckDBFile.name}`}
-                    >
-                      <Database className="h-3 w-3 text-amber-600 dark:text-amber-400" />
-                      <span>Check DB Health</span>
-                    </Link>
+                    
                   </div>
                 )}
               </div>
@@ -1013,7 +964,7 @@ export function Export() {
                 type="button"
                 onClick={() => triggerDownload('keywords', undefined, 'keywords.txt')}
                 className="flex items-center justify-between p-3 rounded border border-blue-200 dark:border-blue-900/60 bg-blue-50/40 dark:bg-blue-950/20 hover:border-blue-400 dark:hover:border-blue-700 hover:bg-blue-50/80 dark:hover:bg-blue-950/40 text-left transition cursor-pointer group shadow-xs"
-                title={`Download active search keywords query (keywords.txt) for ${activeProject}`}
+                
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="p-2 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-600 dark:text-blue-300 shrink-0">
@@ -1022,13 +973,9 @@ export function Export() {
                   <div className="flex flex-col min-w-0">
                     <span className="font-mono font-bold text-xs text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
                       keywords.txt
-                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-blue-100 dark:bg-blue-900/70 text-blue-700 dark:text-blue-300 uppercase font-semibold">
-                        Query
-                      </span>
+                      
                     </span>
-                    <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-sans truncate">
-                      Download Boolean search keywords query configured for {activeProject}
-                    </span>
+                    
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-blue-200 dark:border-blue-800 bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 text-xs font-mono font-semibold shrink-0 ml-2 group-hover:bg-blue-600 group-hover:text-white transition">
@@ -1042,7 +989,7 @@ export function Export() {
                 type="button"
                 onClick={() => triggerDownload('topics', undefined, 'topics.txt')}
                 className="flex items-center justify-between p-3 rounded border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/20 hover:border-emerald-400 dark:hover:border-emerald-700 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 text-left transition cursor-pointer group shadow-xs"
-                title={`Download OpenAlex target topic IDs list (topics.txt) for ${activeProject}`}
+                
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="p-2 rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-300 shrink-0">
@@ -1051,13 +998,9 @@ export function Export() {
                   <div className="flex flex-col min-w-0">
                     <span className="font-mono font-bold text-xs text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
                       topics.txt
-                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-100 dark:bg-emerald-900/70 text-emerald-700 dark:text-emerald-300 uppercase font-semibold">
-                        Topics
-                      </span>
+                    
                     </span>
-                    <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-sans truncate">
-                      Download OpenAlex target topic IDs list configured for {activeProject}
-                    </span>
+                    
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 text-xs font-mono font-semibold shrink-0 ml-2 group-hover:bg-emerald-600 group-hover:text-white transition">
@@ -1159,14 +1102,7 @@ export function Export() {
                               </span>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                              <Link
-                                to="/check-db"
-                                search={{ file: db.name }}
-                                className="px-2 py-1 rounded border border-amber-500/40 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-[10px] font-mono font-bold uppercase cursor-pointer transition"
-                                title={`Open check-db health check page for ${db.name}`}
-                              >
-                                Check DB
-                              </Link>
+                            
                               <button
                                 type="button"
                                 onClick={() => triggerDownload('duckdb', undefined, db.name)}

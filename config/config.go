@@ -131,7 +131,7 @@ func initConfigTable(dbConn *sql.DB) error {
 			batch_size_topics, per_page, concurrent_requests, max_retries, retry_delay,
 			llm_provider, llm_model, llm_base_url, keywords, topics, anchors
 		) VALUES (
-			1, 'sathyarajasekar5873@gmail.com', '28leglCF5hY0mVmVYXSNNm', '2003-01-01', '2025-12-31', 'article,review,proceedings-article',
+			1, 'sathyarajasekar5873@gmail.com', '28leglCF5hY0mVmVYXSNNm', '2003-01-01', '2025-12-31', 'article,review,conference-paper',
 			10, 200, 10, 5, 2,
 			'ollama', 'qwen3:4b', 'http://localhost:11434', '', '', ''
 		)`)
@@ -186,6 +186,9 @@ func LoadConfigFromDB(dbPath string) (*AppConfig, error) {
 	if docTypes != "" {
 		for _, dt := range strings.Split(docTypes, ",") {
 			trimmed := strings.TrimSpace(dt)
+			if trimmed == "proceedings-article" {
+				trimmed = "conference-paper"
+			}
 			if trimmed != "" {
 				docTypeList = append(docTypeList, trimmed)
 			}
